@@ -73,3 +73,94 @@ test("upsertCompose falls back to compose.update when saveEnvironment is unavail
   assert.equal(updates[0].body.composeFile, "services: {}");
   assert.deepEqual(updates[1].body, { composeId: "compose-1", env: "API_SECRET=two\n" });
 });
+
+test("upsertCompose can save a Gitea source-backed Compose app for push deploys", async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    const parsed = new URL(String(url));
+    const body = init.body ? JSON.parse(init.body) : null;
+    calls.push({ method: init.method, path: parsed.pathname, body });
+    return Response.json({ json: {} });
+  };
+
+  try {
+    const provider = new DokployProvider({
+      config: {
+        app: { slug: "compose-app" },
+        deploy: { provider: { url: "https://dokploy.example.test", apiKey: "dummy" } },
+      },
+      state: { dokploy: { composeId: "compose-1" } },
+    });
+    await provider.upsertCompose("environment-1", "services: {}", "API_SECRET=two\n", {
+      source: {
+        sourceType: "gitea",
+        giteaId: "gitea-1",
+        owner: "acme",
+        repository: "source-app",
+        branch: "main",
+        composePath: "deploy/nstack/compose.dokploy.yaml",
+        watchPaths: [],
+      },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  const update = calls.find((call) => call.path === "/api/compose.update");
+  assert.equal(update.body.sourceType, "gitea");
+  assert.equal(update.body.giteaId, "gitea-1");
+  assert.equal(update.body.giteaOwner, "acme");
+  assert.equal(update.body.giteaRepository, "source-app");
+  assert.equal(update.body.giteaBranch, "main");
+  assert.equal(update.body.composePath, "deploy/nstack/compose.dokploy.yaml");
+  assert.equal(update.body.autoDeploy, true);
+  assert.equal(update.body.triggerType, "push");
+});
+
+test("resolveComposeSource matches Forgejo repositories to Dokploy Gitea providers", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const parsed = new URL(String(url));
+    assert.equal(parsed.pathname, "/api/trpc/gitProvider.getAll");
+    return Response.json({
+      json: [
+        {
+          providerType: "gitea",
+          gitea: {
+            giteaId: "gitea-1",
+            giteaUrl: "https://git.example.test",
+          },
+        },
+      ],
+    });
+  };
+
+  try {
+    const provider = new DokployProvider({
+      config: {
+        app: { slug: "compose-app" },
+        deploy: {
+          source: {
+            repository: "git@git.example.test:acme/source-app.git",
+            branch: "main",
+          },
+          provider: { url: "https://dokploy.example.test", apiKey: "dummy" },
+        },
+      },
+      state: { dokploy: {} },
+    });
+    const source = await provider.resolveComposeSource();
+    assert.deepEqual(source, {
+      sourceType: "gitea",
+      giteaId: "gitea-1",
+      owner: "acme",
+      repository: "source-app",
+      branch: "main",
+      composePath: "deploy/nstack/compose.dokploy.yaml",
+      watchPaths: [],
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

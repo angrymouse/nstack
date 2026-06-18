@@ -43,7 +43,7 @@ test("init keeps deploy target values out of source config", async () => {
 
   const gitignore = readFileSync(path.join(target, ".gitignore"), "utf8");
   assert.match(gitignore, /^\.nstack$/m);
-  assert.match(gitignore, /^deploy\/nstack$/m);
+  assert.doesNotMatch(gitignore, /^deploy\/nstack$/m);
   assert.match(gitignore, /^\.env\.\*$/m);
 
   const dockerignore = readFileSync(path.join(target, "frontend", ".dockerignore"), "utf8");

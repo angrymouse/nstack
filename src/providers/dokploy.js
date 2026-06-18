@@ -77,7 +77,7 @@ export class DokployProvider {
     const existing = await this.findProjectByName(name);
     if (existing) return existing;
     const created = await this.client.apiPost("project.create", { name, description: "Managed by nstack" });
-    return idOf(created, ["projectId", "id"]);
+    return idOf(created, ["projectId", "id"]) || await this.findProjectByName(name);
   }
 
   async ensureEnvironment(projectId) {
@@ -86,7 +86,7 @@ export class DokployProvider {
     const existing = await this.findEnvironmentByName(projectId, name);
     if (existing) return existing;
     const created = await this.client.apiPost("environment.create", { name, projectId, description: "Managed by nstack" });
-    return idOf(created, ["environmentId", "id"]);
+    return idOf(created, ["environmentId", "id"]) || await this.findEnvironmentByName(projectId, name);
   }
 
   async ensurePostgres(environmentId, infra, options = {}) {
@@ -156,17 +156,18 @@ export class DokployProvider {
     }
   }
 
-  async upsertCompose(environmentId, composeFile, env = "") {
+  async upsertCompose(environmentId, composeFile, env = "", options = {}) {
     const name = `${this.config.app.slug}-app`;
     const stateId = this.state.dokploy?.composeId;
+    const source = options.source || null;
     if (stateId) {
-      await this.updateComposeFile(environmentId, stateId, composeFile);
+      await this.updateComposeFile(environmentId, stateId, composeFile, source);
       await this.saveComposeEnvironment(stateId, env);
       return stateId;
     }
     const existing = await this.findByName("compose.search", { environmentId, name, limit: 50 }, name, ["composeId", "id"]);
     if (existing) {
-      await this.updateComposeFile(environmentId, existing, composeFile);
+      await this.updateComposeFile(environmentId, existing, composeFile, source);
       await this.saveComposeEnvironment(existing, env);
       return existing;
     }
@@ -181,22 +182,58 @@ export class DokployProvider {
     });
     const composeId = idOf(created, ["composeId", "id"]);
     if (!composeId) throw new Error(`Dokploy compose.create did not return a compose id: ${JSON.stringify(created)}`);
-    await this.updateComposeFile(environmentId, composeId, composeFile);
+    await this.updateComposeFile(environmentId, composeId, composeFile, source);
     await this.saveComposeEnvironment(composeId, env);
     return composeId;
   }
 
-  async updateComposeFile(environmentId, composeId, composeFile) {
+  async updateComposeFile(environmentId, composeId, composeFile, source = null) {
     await this.client.apiPost("compose.update", {
       composeId,
       name: `${this.config.app.slug}-app`,
       appName: this.config.app.slug,
       composeFile,
       composeType: "docker-compose",
-      composePath: "./docker-compose.yml",
-      sourceType: "raw",
+      composePath: source?.composePath || "./docker-compose.yml",
+      sourceType: source?.sourceType || "raw",
+      ...(source?.sourceType === "gitea" ? {
+        giteaId: source.giteaId,
+        giteaOwner: source.owner,
+        giteaRepository: source.repository,
+        giteaBranch: source.branch,
+        autoDeploy: true,
+        triggerType: "push",
+        watchPaths: source.watchPaths || [],
+      } : {}),
       environmentId,
     });
+  }
+
+  async resolveComposeSource() {
+    const repository = this.config.deploy.source?.repository || "";
+    const branch = this.config.deploy.source?.branch || "";
+    const parsed = parseGitRepository(repository);
+    if (!parsed || !branch) return null;
+
+    const providers = asList(await this.client.trpcGet("gitProvider.getAll"));
+    const match = providers.find((provider) => {
+      if (provider?.providerType !== "gitea") return false;
+      const gitea = provider.gitea || {};
+      if (this.config.deploy.source?.giteaId && gitea.giteaId !== this.config.deploy.source.giteaId) return false;
+      return normalizedHost(gitea.giteaUrl) === parsed.host;
+    });
+    const giteaId = this.config.deploy.source?.giteaId || match?.gitea?.giteaId || "";
+    if (!giteaId) return null;
+
+    return {
+      sourceType: "gitea",
+      giteaId,
+      owner: parsed.owner,
+      repository: parsed.repository,
+      branch,
+      composePath: this.config.deploy.source?.composePath || "deploy/nstack/compose.dokploy.yaml",
+      watchPaths: this.config.deploy.source?.watchPaths || [],
+    };
   }
 
   async saveComposeEnvironment(composeId, env = "") {
@@ -440,6 +477,30 @@ export class DokployProvider {
 
 function serverPart(config) {
   return config.deploy.provider.serverId ? { serverId: config.deploy.provider.serverId } : {};
+}
+
+function parseGitRepository(repository = "") {
+  const value = String(repository || "").trim();
+  if (!value) return null;
+  const https = value.match(/^https?:\/\/([^/]+)\/([^/]+)\/([^/#]+?)(?:\.git)?(?:#.*)?$/i);
+  const ssh = value.match(/^(?:ssh:\/\/)?git@([^/:]+)[:/]([^/]+)\/([^/#]+?)(?:\.git)?(?:#.*)?$/i);
+  const match = https || ssh;
+  if (!match) return null;
+  return {
+    host: normalizedHost(match[1]),
+    owner: match[2],
+    repository: match[3],
+  };
+}
+
+function normalizedHost(urlOrHost = "") {
+  const value = String(urlOrHost || "").trim().replace(/\/+$/, "");
+  if (!value) return "";
+  try {
+    return new URL(value.includes("://") ? value : `https://${value}`).host.toLowerCase();
+  } catch {
+    return value.replace(/^https?:\/\//, "").split("/")[0].toLowerCase();
+  }
 }
 
 export function existingInfraSecretError(kind, name, envKey) {

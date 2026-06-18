@@ -31,7 +31,7 @@ export function renderEncoreInfra(ctx) {
         databases: Object.fromEntries(resources.databases.map((database) => [
           postgresDatabaseName(resources, infra, database),
           {
-            name: database.name,
+            name: resources.databases.length === 1 ? infra.postgres.database : database.name,
             username: infra.postgres.user,
             password: { $env: "NSTACK_POSTGRES_PASSWORD" },
             min_connections: 1,
@@ -85,8 +85,7 @@ function hostedGatewayNames(resources) {
     .filter(Boolean))];
 }
 
-function postgresDatabaseName(resources, infra, database) {
-  if (resources.databases.length === 1) return infra.postgres.database;
+function postgresDatabaseName(resources, _infra, database) {
   return database.name;
 }
 

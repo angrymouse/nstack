@@ -8,7 +8,6 @@ coverage
 .vite
 .cache
 
-deploy/nstack
 .nstack
 .env
 .env.*

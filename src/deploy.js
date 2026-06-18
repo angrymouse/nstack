@@ -102,6 +102,7 @@ export async function deploy(options = {}) {
     resources,
     infra,
     secretEnv: buildOnlySecretEnv(resources, secretEnv),
+    buildEnv: composeBuildValues({ config, release, infraText }),
   });
   writeText(infraFile, infraText);
   writeText(composeFile, renderDokployCompose(ctx));
@@ -196,10 +197,17 @@ export async function deploy(options = {}) {
   writeText(infraFile, infraText);
   writeText(composeFile, renderDokployCompose(ctx));
 
+  const composeSource = await provider.resolveComposeSource();
   const composeId = await provider.upsertCompose(
     environmentId,
     renderDokployCompose({ ...ctx, state: nextState }),
-    renderComposeEnvironment({ resources, infra, secretEnv }),
+    renderComposeEnvironment({
+      resources,
+      infra,
+      secretEnv,
+      buildEnv: composeBuildValues({ config, release, infraText, source: composeSource }),
+    }),
+    { source: composeSource },
   );
   nextState.dokploy.composeId = composeId;
   persistFullState();
@@ -1044,9 +1052,9 @@ function deploymentArtifacts({ config, release, infraText = "", localContext = f
         backend: {
           dockerfile: config.paths.backendDockerfile,
           args: {
-            ENCORE_INFRA_CONFIG_B64: Buffer.from(infraText).toString("base64"),
-            NSTACK_GIT_COMMIT: release.commit,
-            NSTACK_IMAGE_TAG: release.tag,
+            ENCORE_INFRA_CONFIG_B64: "${ENCORE_INFRA_CONFIG_B64:?set ENCORE_INFRA_CONFIG_B64}",
+            NSTACK_GIT_COMMIT: "${NSTACK_GIT_COMMIT:-local}",
+            NSTACK_IMAGE_TAG: "${NSTACK_IMAGE_TAG:-local}",
           },
         },
         frontend: {
@@ -1059,7 +1067,24 @@ function deploymentArtifacts({ config, release, infraText = "", localContext = f
 
 function sourceBuildContext(config, release, { localContext = false } = {}) {
   const repository = config.deploy.source?.repository || "";
+  if (repository) return "${NSTACK_BUILD_CONTEXT:-../..}";
   if (!repository && localContext) return "../..";
+  return ".";
+}
+
+function composeBuildValues({ config, release, infraText, source = null }) {
+  return {
+    ENCORE_INFRA_CONFIG_B64: Buffer.from(infraText).toString("base64"),
+    NSTACK_BUILD_CONTEXT: source?.sourceType === "gitea"
+      ? "../.."
+      : sourceBuildContextForEnv(config, release),
+    NSTACK_GIT_COMMIT: release.commit,
+    NSTACK_IMAGE_TAG: release.tag,
+  };
+}
+
+function sourceBuildContextForEnv(config, release) {
+  const repository = config.deploy.source?.repository || "";
   if (!repository) return ".";
   if (repository.includes("#")) return repository;
   const ref = release.commit && release.commit !== "local"

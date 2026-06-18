@@ -18,8 +18,8 @@ export function renderDokployCompose(ctx) {
           NUXT_API_SERVER_BASE_URL: "http://backend:8080",
           NUXT_API_INTERNAL_BASE_URL: "http://backend:8080",
           NSTACK_APP_SLUG: config.app.slug,
-          NSTACK_GIT_COMMIT: release.commit,
-          NSTACK_IMAGE_TAG: release.tag,
+          NSTACK_GIT_COMMIT: "${NSTACK_GIT_COMMIT:-local}",
+          NSTACK_IMAGE_TAG: "${NSTACK_IMAGE_TAG:-local}",
         },
         expose: ["3000"],
         depends_on: {
@@ -70,7 +70,7 @@ ${stringifyYaml(doc)}`;
 function serviceImageOrBuild(name, { config, release, image, build }) {
   if (!build) return { image };
   const service = build.services?.[name];
-  const localImage = `${config.app.slug}-${name}:${release.tag}`;
+  const localImage = `${config.app.slug}-${name}:\${NSTACK_IMAGE_TAG:-local}`;
   return {
     image: service?.image || localImage,
     pull_policy: "build",
@@ -84,14 +84,14 @@ function serviceImageOrBuild(name, { config, release, image, build }) {
 }
 
 function backendEnv(ctx) {
-  const { config, resources, release } = ctx;
+  const { config, resources } = ctx;
   const env = {
     PORT: "8080",
     NODE_ENV: "production",
     APP_ID: config.app.slug,
-    APP_VERSION: release.commit,
-    GIT_COMMIT: release.commit,
-    IMAGE_TAG: release.tag,
+    APP_VERSION: "${NSTACK_GIT_COMMIT:-local}",
+    GIT_COMMIT: "${NSTACK_GIT_COMMIT:-local}",
+    IMAGE_TAG: "${NSTACK_IMAGE_TAG:-local}",
     NSTACK_TARGET: config.deploy.target,
     NSTACK_DOMAIN: config.app.domain,
   };

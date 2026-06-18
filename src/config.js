@@ -81,7 +81,18 @@ function normalizeSource(source = {}) {
   return {
     repository: process.env.NSTACK_REPOSITORY || process.env.DOKPLOY_REPOSITORY || source.repository || "",
     branch: process.env.NSTACK_BRANCH || process.env.DOKPLOY_BRANCH || source.branch || "",
+    giteaId: process.env.NSTACK_GITEA_ID || process.env.DOKPLOY_GITEA_ID || source.giteaId || "",
+    composePath: process.env.NSTACK_COMPOSE_PATH || source.composePath || "",
+    watchPaths: normalizeWatchPaths(process.env.NSTACK_WATCH_PATHS || source.watchPaths || []),
   };
+}
+
+function normalizeWatchPaths(value) {
+  if (Array.isArray(value)) return value.filter(Boolean).map(String);
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 export function targetFromOptions(options = {}) {
