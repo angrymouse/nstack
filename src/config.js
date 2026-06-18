@@ -78,13 +78,34 @@ export function normalizeBuildMode(value, registry = "") {
 }
 
 function normalizeSource(source = {}) {
+  const sourceType = normalizeSourceType(process.env.NSTACK_SOURCE_TYPE || process.env.DOKPLOY_SOURCE_TYPE || source.sourceType || source.type || "");
   return {
+    ...(sourceType ? { sourceType } : {}),
     repository: process.env.NSTACK_REPOSITORY || process.env.DOKPLOY_REPOSITORY || source.repository || "",
     branch: process.env.NSTACK_BRANCH || process.env.DOKPLOY_BRANCH || source.branch || "",
+    githubId: process.env.NSTACK_GITHUB_ID || process.env.DOKPLOY_GITHUB_ID || source.githubId || "",
+    gitlabId: process.env.NSTACK_GITLAB_ID || process.env.DOKPLOY_GITLAB_ID || source.gitlabId || "",
+    bitbucketId: process.env.NSTACK_BITBUCKET_ID || process.env.DOKPLOY_BITBUCKET_ID || source.bitbucketId || "",
     giteaId: process.env.NSTACK_GITEA_ID || process.env.DOKPLOY_GITEA_ID || source.giteaId || "",
+    gitlabProjectId: normalizeOptionalNumber(process.env.NSTACK_GITLAB_PROJECT_ID || source.gitlabProjectId),
+    gitlabPathNamespace: process.env.NSTACK_GITLAB_PATH_NAMESPACE || source.gitlabPathNamespace || "",
+    bitbucketRepositorySlug: process.env.NSTACK_BITBUCKET_REPOSITORY_SLUG || source.bitbucketRepositorySlug || "",
+    sshKeyId: process.env.NSTACK_GIT_SSH_KEY_ID || process.env.DOKPLOY_GIT_SSH_KEY_ID || source.sshKeyId || source.customGitSSHKeyId || "",
     composePath: process.env.NSTACK_COMPOSE_PATH || source.composePath || "",
     watchPaths: normalizeWatchPaths(process.env.NSTACK_WATCH_PATHS || source.watchPaths || []),
   };
+}
+
+function normalizeSourceType(value = "") {
+  const type = String(value || "").trim().toLowerCase();
+  if (["github", "gitlab", "bitbucket", "gitea", "git", "raw"].includes(type)) return type;
+  return "";
+}
+
+function normalizeOptionalNumber(value) {
+  if (value === undefined || value === null || value === "") return "";
+  const number = Number(value);
+  return Number.isFinite(number) ? number : "";
 }
 
 function normalizeWatchPaths(value) {

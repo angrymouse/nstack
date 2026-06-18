@@ -1073,7 +1073,7 @@ function sourceBuildContext(config, release, { localContext = false } = {}) {
 }
 
 function composeBuildValues({ config, release, infraText, source = null }) {
-  const sourceBacked = source?.sourceType === "gitea";
+  const sourceBacked = Boolean(source?.sourceType && source.sourceType !== "raw");
   return {
     ENCORE_INFRA_CONFIG_B64: Buffer.from(infraText).toString("base64"),
     NSTACK_BUILD_CONTEXT: sourceBacked
@@ -1095,8 +1095,8 @@ function sourceBuildContextForEnv(config, release) {
 }
 
 function sourceRefLabel(source) {
-  return [source.owner, source.repository].filter(Boolean).join("/")
-    + (source.branch ? `@${source.branch}` : "");
+  return source.refLabel || ([source.owner, source.repository].filter(Boolean).join("/")
+    + (source.branch ? `@${source.branch}` : ""));
 }
 
 function sourceImageTag(source) {

@@ -196,43 +196,40 @@ export class DokployProvider {
       composeType: "docker-compose",
       composePath: source?.composePath || "./docker-compose.yml",
       sourceType: source?.sourceType || "raw",
-      ...(source?.sourceType === "gitea" ? {
-        giteaId: source.giteaId,
-        giteaOwner: source.owner,
-        giteaRepository: source.repository,
-        giteaBranch: source.branch,
-        autoDeploy: true,
-        triggerType: "push",
-        watchPaths: source.watchPaths || [],
-      } : {}),
+      ...composeSourcePayload(source),
       environmentId,
     });
   }
 
   async resolveComposeSource() {
-    const repository = this.config.deploy.source?.repository || "";
-    const branch = this.config.deploy.source?.branch || "";
+    const sourceConfig = this.config.deploy.source || {};
+    const repository = sourceConfig.repository || "";
+    const branch = sourceConfig.branch || "";
     const parsed = parseGitRepository(repository);
     if (!parsed || !branch) return null;
 
     const providers = asList(await this.client.trpcGet("gitProvider.getAll"));
-    const match = providers.find((provider) => {
-      if (provider?.providerType !== "gitea") return false;
-      const gitea = provider.gitea || {};
-      if (this.config.deploy.source?.giteaId && gitea.giteaId !== this.config.deploy.source.giteaId) return false;
-      return normalizedHost(gitea.giteaUrl) === parsed.host;
-    });
-    const giteaId = this.config.deploy.source?.giteaId || match?.gitea?.giteaId || "";
-    if (!giteaId) return null;
+    const sourceType = resolveSourceType(sourceConfig, parsed, providers);
+    if (!sourceType) return null;
+    if (sourceType === "git") return plainGitSource(sourceConfig, parsed, branch);
+
+    const match = providers.find((provider) => providerMatchesSource(provider, sourceType, parsed, sourceConfig));
+    const providerId = configuredProviderId(sourceConfig, sourceType) || providerSpecificId(match, sourceType);
+    if (!providerId) return null;
 
     return {
-      sourceType: "gitea",
-      giteaId,
+      sourceType,
+      [`${sourceType}Id`]: providerId,
       owner: parsed.owner,
       repository: parsed.repository,
       branch,
-      composePath: this.config.deploy.source?.composePath || "deploy/nstack/compose.dokploy.yaml",
-      watchPaths: this.config.deploy.source?.watchPaths || [],
+      pathNamespace: parsed.pathNamespace,
+      gitlabProjectId: sourceConfig.gitlabProjectId || "",
+      gitlabPathNamespace: sourceConfig.gitlabPathNamespace || parsed.pathNamespace,
+      bitbucketRepositorySlug: sourceConfig.bitbucketRepositorySlug || parsed.repository,
+      composePath: sourceConfig.composePath || "deploy/nstack/compose.dokploy.yaml",
+      watchPaths: sourceConfig.watchPaths || [],
+      refLabel: `${parsed.pathNamespace}@${branch}`,
     };
   }
 
@@ -479,18 +476,150 @@ function serverPart(config) {
   return config.deploy.provider.serverId ? { serverId: config.deploy.provider.serverId } : {};
 }
 
-function parseGitRepository(repository = "") {
-  const value = String(repository || "").trim();
-  if (!value) return null;
-  const https = value.match(/^https?:\/\/([^/]+)\/([^/]+)\/([^/#]+?)(?:\.git)?(?:#.*)?$/i);
-  const ssh = value.match(/^(?:ssh:\/\/)?git@([^/:]+)[:/]([^/]+)\/([^/#]+?)(?:\.git)?(?:#.*)?$/i);
-  const match = https || ssh;
-  if (!match) return null;
-  return {
-    host: normalizedHost(match[1]),
-    owner: match[2],
-    repository: match[3],
+function composeSourcePayload(source = null) {
+  if (!source) return {};
+  const common = {
+    autoDeploy: true,
+    triggerType: "push",
+    watchPaths: source.watchPaths || [],
   };
+  if (source.sourceType === "github") {
+    return {
+      githubId: source.githubId,
+      owner: source.owner,
+      repository: source.repository,
+      branch: source.branch,
+      ...common,
+    };
+  }
+  if (source.sourceType === "gitlab") {
+    return {
+      gitlabId: source.gitlabId,
+      gitlabOwner: source.owner,
+      gitlabRepository: source.repository,
+      gitlabBranch: source.branch,
+      gitlabPathNamespace: source.gitlabPathNamespace || source.pathNamespace,
+      ...(source.gitlabProjectId ? { gitlabProjectId: Number(source.gitlabProjectId) } : {}),
+      ...common,
+    };
+  }
+  if (source.sourceType === "bitbucket") {
+    return {
+      bitbucketId: source.bitbucketId,
+      bitbucketOwner: source.owner,
+      bitbucketRepository: source.repository,
+      bitbucketRepositorySlug: source.bitbucketRepositorySlug || source.repository,
+      bitbucketBranch: source.branch,
+      ...common,
+    };
+  }
+  if (source.sourceType === "gitea") {
+    return {
+      giteaId: source.giteaId,
+      giteaOwner: source.owner,
+      giteaRepository: source.repository,
+      giteaBranch: source.branch,
+      ...common,
+    };
+  }
+  if (source.sourceType === "git") {
+    return {
+      customGitUrl: source.repositoryUrl,
+      customGitBranch: source.branch,
+      ...(source.sshKeyId ? { customGitSSHKeyId: source.sshKeyId } : {}),
+    };
+  }
+  return {};
+}
+
+function resolveSourceType(sourceConfig, parsed, providers) {
+  if (sourceConfig.sourceType) return sourceConfig.sourceType;
+  const explicitIdType = providerTypeFromExplicitId(sourceConfig);
+  if (explicitIdType) return explicitIdType;
+  const match = providers.find((provider) => providerMatchesAnySource(provider, parsed, sourceConfig));
+  return match?.providerType || "";
+}
+
+function providerTypeFromExplicitId(sourceConfig) {
+  for (const type of ["github", "gitlab", "bitbucket", "gitea"]) {
+    if (configuredProviderId(sourceConfig, type)) return type;
+  }
+  if (sourceConfig.sshKeyId) return "git";
+  return "";
+}
+
+function providerMatchesAnySource(provider, parsed, sourceConfig) {
+  return ["github", "gitlab", "bitbucket", "gitea"]
+    .some((type) => providerMatchesSource(provider, type, parsed, sourceConfig));
+}
+
+function providerMatchesSource(provider, type, parsed, sourceConfig) {
+  if (provider?.providerType !== type) return false;
+  const configured = configuredProviderId(sourceConfig, type);
+  if (configured && providerSpecificId(provider, type) !== configured) return false;
+  if (type === "github") return parsed.host === "github.com";
+  if (type === "bitbucket") return parsed.host === "bitbucket.org";
+  return providerHosts(provider, type).includes(parsed.host);
+}
+
+function providerHosts(provider, type) {
+  const details = provider?.[type] || {};
+  if (type === "gitlab") return [details.gitlabUrl, details.gitlabInternalUrl].map(normalizedHost).filter(Boolean);
+  if (type === "gitea") return [details.giteaUrl, details.giteaInternalUrl].map(normalizedHost).filter(Boolean);
+  return [];
+}
+
+function configuredProviderId(sourceConfig, type) {
+  return sourceConfig?.[`${type}Id`] || "";
+}
+
+function providerSpecificId(provider, type) {
+  return provider?.[type]?.[`${type}Id`] || "";
+}
+
+function plainGitSource(sourceConfig, parsed, branch) {
+  return {
+    sourceType: "git",
+    owner: parsed.owner,
+    repository: parsed.repository,
+    repositoryUrl: sourceConfig.repository,
+    branch,
+    sshKeyId: sourceConfig.sshKeyId || "",
+    composePath: sourceConfig.composePath || "deploy/nstack/compose.dokploy.yaml",
+    watchPaths: sourceConfig.watchPaths || [],
+    refLabel: `${parsed.pathNamespace}@${branch}`,
+  };
+}
+
+function parseGitRepository(repository = "") {
+  const value = String(repository || "").trim().replace(/#.*$/, "");
+  if (!value) return null;
+  const parsedUrl = parseGitUrl(value);
+  if (!parsedUrl) return null;
+  let pathName = parsedUrl.path.replace(/^\/+|\/+$/g, "");
+  if (pathName.endsWith(".git")) pathName = pathName.slice(0, -4);
+  const parts = pathName.split("/").filter(Boolean);
+  if (parts.length < 2) return null;
+  return {
+    host: normalizedHost(parsedUrl.host),
+    owner: parts[0],
+    repository: parts[parts.length - 1],
+    pathNamespace: parts.join("/"),
+  };
+}
+
+function parseGitUrl(value) {
+  if (/^https?:\/\//i.test(value) || /^ssh:\/\//i.test(value)) {
+    try {
+      const url = new URL(value);
+      return { host: url.host, path: url.pathname };
+    } catch {
+      return null;
+    }
+  }
+  const scpLike = value.match(/^(?:[^@]+@)?([^:/]+):(.+)$/);
+  if (scpLike) return { host: scpLike[1], path: scpLike[2] };
+  return null;
 }
 
 function normalizedHost(urlOrHost = "") {

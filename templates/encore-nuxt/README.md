@@ -29,6 +29,12 @@ nstack status
 Deploy settings live in `.nstack/local.env`. App runtime secrets live in
 `.nstack/secrets.env`.
 
+For deploy-on-push, connect the matching Git provider in Dokploy first. nstack
+can configure provider-backed Compose sources for GitHub, GitLab, Bitbucket, and
+Gitea/Forgejo. Use `deploy.source` in `nstack.config.mjs` for advanced provider
+fields such as explicit provider ids, GitLab path namespace, Bitbucket slug, or
+custom plain-Git SSH key id.
+
 ## Secrets
 
 ```sh

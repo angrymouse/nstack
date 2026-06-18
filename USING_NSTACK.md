@@ -182,13 +182,20 @@ Use HTTPS for ongoing production use.
 
 Create an empty repository for the app, then copy its URL. The Dokploy server must be able to fetch it.
 
-For a public repository, an HTTPS URL is usually enough:
+For provider-backed deploy-on-push, connect the matching Git provider in Dokploy before the first deploy. nstack can configure Dokploy Compose source deployments for:
+
+- GitHub repositories when Dokploy has a GitHub provider/app connected.
+- GitLab repositories when Dokploy has a GitLab provider connected, including self-hosted GitLab.
+- Bitbucket repositories when Dokploy has a Bitbucket provider connected.
+- Gitea or Forgejo repositories when Dokploy has a Gitea provider connected.
+
+For a public repository, an HTTPS URL is usually enough for source builds:
 
 ```text
 https://github.com/acme/my-app.git
 ```
 
-For a private repository, configure access for the Dokploy server before the first deploy. The exact setup depends on your Git host and Dokploy host: use a deploy key, token-backed HTTPS URL, or another Git access method your server can fetch.
+For private repositories and automatic push deploys, prefer the native Dokploy provider integration for your Git host. Plain Git source mode can also clone custom repositories when configured with a Dokploy SSH key id, but native provider-backed sources are the route that gives Dokploy its normal push webhook behavior.
 
 ### 7. Scaffold The App
 
@@ -255,6 +262,27 @@ nstack configure --platform linux/amd64
 
 This writes local deploy settings to `.nstack/local.env`. The file is ignored by Git and should not be committed.
 
+For most GitHub, GitLab, Bitbucket, and Gitea/Forgejo apps, nstack can infer the provider from the repository host and the providers already connected in Dokploy. If there are multiple providers for the same host, or you are using GitLab subgroups, Bitbucket slugs, or plain Git, add the advanced source fields to `nstack.config.mjs`:
+
+```js
+export default {
+  deploy: {
+    source: {
+      repository: "https://gitlab.example.com/platform/apps/my-app.git",
+      branch: "main",
+      sourceType: "gitlab",
+      gitlabId: "<dokploy-gitlab-provider-id>",
+      gitlabProjectId: 123,
+      gitlabPathNamespace: "platform/apps/my-app",
+      composePath: "deploy/nstack/compose.dokploy.yaml",
+      watchPaths: ["backend/**", "frontend/**", "deploy/nstack/**"],
+    },
+  },
+};
+```
+
+Use `githubId`, `gitlabId`, `bitbucketId`, or `giteaId` to pin a specific Dokploy provider. For plain Git, use `sourceType: "git"` and `sshKeyId: "<dokploy-ssh-key-id>"` for private SSH repositories.
+
 ### 11. Add Runtime Secrets If Needed
 
 The generated app does not require an app runtime secret by default. If your backend declares required secrets or your app reads environment variables at runtime, store them locally first:
@@ -292,7 +320,7 @@ Render once to inspect the deploy plan without deploying:
 nstack render
 ```
 
-The render command writes generated artifacts under `deploy/nstack/`. That directory is ignored because nstack can regenerate it.
+The render command writes generated artifacts under `deploy/nstack/`. Commit those files for Dokploy source builds, because Dokploy reads the Compose file from the repository on push deployments.
 
 ### 13. Deploy To Production
 

@@ -17,6 +17,12 @@ Compose, lets Dokploy build the production backend/frontend services from source
 provisions Dokploy resources, creates Dokploy Domains/Traefik routes, deploys,
 verifies the public URL, and prints the result.
 
+For automatic deploy-on-push, connect the matching Git provider in Dokploy first.
+nstack can configure Dokploy Compose source deployments for GitHub, GitLab,
+Bitbucket, and Gitea/Forgejo when Dokploy has that provider connected. Plain Git
+source mode is available for custom hosts, but provider-backed sources are the
+path that gives Dokploy native push webhooks.
+
 ## Daily Commands
 
 ```sh

@@ -82,3 +82,34 @@ test("loadConfig uses target-specific local env overlays", async () => {
     }
   }
 });
+
+test("loadConfig preserves provider-specific source settings", async () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "nstack-config-source-"));
+  mkdirSync(cwd, { recursive: true });
+  writeFileSync(path.join(cwd, "nstack.config.mjs"), `export default {
+  app: { name: "Source App", slug: "source-app" },
+  deploy: {
+    source: {
+      sourceType: "gitlab",
+      repository: "https://gitlab.example.test/platform/apps/source-app.git",
+      branch: "main",
+      gitlabId: "gitlab-1",
+      gitlabProjectId: 42,
+      gitlabPathNamespace: "platform/apps/source-app",
+      composePath: "deploy/custom/compose.yaml",
+      watchPaths: ["backend/**", "frontend/**"]
+    }
+  }
+};\n`);
+
+  const config = await loadConfig(cwd);
+
+  assert.equal(config.deploy.source.sourceType, "gitlab");
+  assert.equal(config.deploy.source.repository, "https://gitlab.example.test/platform/apps/source-app.git");
+  assert.equal(config.deploy.source.branch, "main");
+  assert.equal(config.deploy.source.gitlabId, "gitlab-1");
+  assert.equal(config.deploy.source.gitlabProjectId, 42);
+  assert.equal(config.deploy.source.gitlabPathNamespace, "platform/apps/source-app");
+  assert.equal(config.deploy.source.composePath, "deploy/custom/compose.yaml");
+  assert.deepEqual(config.deploy.source.watchPaths, ["backend/**", "frontend/**"]);
+});
