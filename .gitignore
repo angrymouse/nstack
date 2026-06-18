@@ -1,0 +1,14 @@
+.DS_Store
+*.log
+
+node_modules/
+**/node_modules/
+dist/
+coverage/
+
+.encore/
+.nstack/
+deploy/nstack/
+
+*.local
+*.tmp

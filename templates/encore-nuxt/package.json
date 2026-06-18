@@ -1,0 +1,16 @@
+{
+  "name": "__APP_SLUG__",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --parallel --filter './backend' --filter './frontend' dev",
+    "build": "pnpm --dir frontend build",
+    "check": "node scripts/check.mjs",
+    "deploy": "nstack deploy",
+    "status": "nstack status"
+  },
+  "packageManager": "pnpm@10.18.3",
+  "engines": {
+    "node": ">=22"
+  }
+}

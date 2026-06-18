@@ -1,0 +1,259 @@
+import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { test } from "node:test";
+import { runCli } from "../src/cli.js";
+
+test("init keeps deploy target values out of source config", async () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "nstack-init-"));
+  const target = path.join(cwd, "app");
+  const envKeys = ["NSTACK_DOMAIN", "NSTACK_REGISTRY", "DOKPLOY_URL", "DOKPLOY_API_KEY"];
+  const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+
+  try {
+    await runCli([
+      "init",
+      target,
+      "--yes",
+      "--domain",
+      "example.test",
+      "--registry",
+      "ghcr.io/acme/app",
+      "--dokploy-url",
+      "https://dokploy.example.test",
+      "--dokploy-api-key",
+      "secret-token",
+    ]);
+  } finally {
+    for (const key of envKeys) {
+      if (originalEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = originalEnv[key];
+    }
+  }
+
+  const config = readFileSync(path.join(target, "nstack.config.mjs"), "utf8");
+  assert.doesNotMatch(config, /NSTACK_REGISTRY|DOKPLOY_URL|DOKPLOY_API_KEY|example\.test|ghcr\.io/);
+
+  const localEnv = readFileSync(path.join(target, ".nstack", "local.env"), "utf8");
+  assert.match(localEnv, /NSTACK_DOMAIN=example\.test/);
+  assert.match(localEnv, /NSTACK_REGISTRY=ghcr\.io\/acme\/app/);
+  assert.match(localEnv, /DOKPLOY_URL=https:\/\/dokploy\.example\.test/);
+  assert.match(localEnv, /DOKPLOY_API_KEY=secret-token/);
+
+  const gitignore = readFileSync(path.join(target, ".gitignore"), "utf8");
+  assert.match(gitignore, /^\.nstack$/m);
+  assert.match(gitignore, /^deploy\/nstack$/m);
+  assert.match(gitignore, /^\.env\.\*$/m);
+
+  const dockerignore = readFileSync(path.join(target, "frontend", ".dockerignore"), "utf8");
+  assert.match(dockerignore, /^node_modules$/m);
+  assert.match(dockerignore, /^\.env\.\*$/m);
+
+  const rootDockerignore = readFileSync(path.join(target, ".dockerignore"), "utf8");
+  assert.match(rootDockerignore, /^\*\*\/node_modules$/m);
+  assert.match(rootDockerignore, /^deploy\/nstack$/m);
+
+  const manifest = JSON.parse(readFileSync(path.join(target, "package.json"), "utf8"));
+  assert.deepEqual(Object.keys(manifest.scripts).sort(), ["build", "check", "deploy", "dev", "status"]);
+  assert.equal(manifest.scripts.dev, "pnpm --parallel --filter './backend' --filter './frontend' dev");
+  assert.equal(manifest.scripts.build, "pnpm --dir frontend build");
+  assert.equal(manifest.scripts.check, "node scripts/check.mjs");
+  assert.equal(manifest.scripts.deploy, "nstack deploy");
+  assert.equal(manifest.scripts.status, "nstack status");
+
+  const generatedConfig = readFileSync(path.join(target, "nstack.config.mjs"), "utf8");
+  assert.match(generatedConfig, /frontendContext: "\."/);
+
+  const frontendDockerfile = readFileSync(path.join(target, "frontend", "Dockerfile"), "utf8");
+  assert.match(frontendDockerfile, /COPY pnpm-lock\.yaml \.\//);
+  assert.match(frontendDockerfile, /pnpm install --filter \.\/frontend\.\.\./);
+  assert.match(frontendDockerfile, /--prefer-offline/);
+  assert.match(frontendDockerfile, /--ignore-scripts/);
+  assert.match(frontendDockerfile, /\.\/node_modules\/\.bin\/nuxt build --logLevel=silent/);
+  assert.match(frontendDockerfile, /COPY --from=build \/workspace\/frontend\/\.output \.\/\.output/);
+  assert.match(frontendDockerfile, /CMD \["node", "\.output\/server\/index\.mjs"\]/);
+  assert.match(frontendDockerfile, /NUXT_TELEMETRY_DISABLED=1/);
+  assert.match(frontendDockerfile, /nstack-frontend-nuxt/);
+  assert.match(frontendDockerfile, /nstack-frontend-vite/);
+  assert.match(frontendDockerfile, /nstack-frontend-jiti/);
+  assert.match(frontendDockerfile, /NITRO_PRESET=node-server/);
+
+  const frontendNuxtConfig = readFileSync(path.join(target, "frontend", "nuxt.config.ts"), "utf8");
+  assert.match(frontendNuxtConfig, /buildCache: true/);
+  assert.match(frontendNuxtConfig, /sourcemap: false/);
+  assert.match(frontendNuxtConfig, /reportCompressedSize: false/);
+  assert.match(frontendNuxtConfig, /preset: "node-server"/);
+  assert.match(frontendNuxtConfig, /sourceMap: false/);
+
+  const frontendManifest = JSON.parse(readFileSync(path.join(target, "frontend", "package.json"), "utf8"));
+  assert.equal(frontendManifest.scripts.build, "nuxt build --logLevel=silent");
+  assert.equal(frontendManifest.scripts.postinstall, undefined);
+
+  const checkRunner = readFileSync(path.join(target, "scripts", "check.mjs"), "utf8");
+  assert.match(checkRunner, /"backend", "exec", "encore", "check", ""/);
+  assert.match(checkRunner, /"backend", "exec", "tsc", "--noEmit"/);
+  assert.match(checkRunner, /"frontend", "exec", "nuxi", "prepare"/);
+
+  const backendManifest = JSON.parse(readFileSync(path.join(target, "backend", "package.json"), "utf8"));
+  assert.equal(backendManifest.scripts.test, "node --test");
+
+  const backendTsconfig = JSON.parse(readFileSync(path.join(target, "backend", "tsconfig.json"), "utf8"));
+  assert.equal(backendTsconfig.compilerOptions.module, "ESNext");
+  assert.equal(backendTsconfig.compilerOptions.moduleResolution, "Bundler");
+});
+
+test("cli flags do not mutate process env while writing local config", async () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "nstack-link-"));
+  const target = path.join(cwd, "app");
+  const envKeys = ["NSTACK_DOMAIN", "NSTACK_REGISTRY", "DOKPLOY_URL", "DOKPLOY_API_KEY"];
+  const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+  for (const key of envKeys) delete process.env[key];
+
+  try {
+    await runCli(["init", target, "--yes"]);
+    const previousCwd = process.cwd();
+    process.chdir(target);
+    try {
+      await runCli([
+        "link",
+        "--yes",
+        "--domain",
+        "linked.example.test",
+        "--registry",
+        "ghcr.io/acme/linked",
+        "--dokploy-url",
+        "https://dokploy.example.test",
+        "--dokploy-api-key",
+        "secret-token",
+      ]);
+    } finally {
+      process.chdir(previousCwd);
+    }
+
+    for (const key of envKeys) assert.equal(process.env[key], undefined);
+  } finally {
+    for (const key of envKeys) {
+      if (originalEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = originalEnv[key];
+    }
+  }
+
+  const localEnv = readFileSync(path.join(target, ".nstack", "local.env"), "utf8");
+  assert.match(localEnv, /NSTACK_DOMAIN=linked\.example\.test/);
+  assert.match(localEnv, /NSTACK_REGISTRY=ghcr\.io\/acme\/linked/);
+});
+
+test("init can write deploy settings for a non-prod target", async () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "nstack-init-target-"));
+  const target = path.join(cwd, "app");
+
+  await runCli([
+    "init",
+    target,
+    "--yes",
+    "--env",
+    "staging",
+    "--domain",
+    "staging.example.test",
+    "--registry",
+    "ghcr.io/acme/app-staging",
+  ]);
+
+  const config = readFileSync(path.join(target, "nstack.config.mjs"), "utf8");
+  const localEnv = readFileSync(path.join(target, ".nstack", "local.staging.env"), "utf8");
+  assert.doesNotMatch(config, /staging\.example\.test|ghcr\.io/);
+  assert.match(localEnv, /NSTACK_TARGET=staging/);
+  assert.match(localEnv, /NSTACK_DOMAIN=staging\.example\.test/);
+  assert.match(localEnv, /NSTACK_REGISTRY=ghcr\.io\/acme\/app-staging/);
+});
+
+test("init --json reports scaffold metadata without secret values", async () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "nstack-init-json-"));
+  const target = path.join(cwd, "app");
+  const output = [];
+  const originalLog = console.log;
+
+  try {
+    console.log = (value = "") => output.push(String(value));
+    const report = await runCli([
+      "init",
+      target,
+      "--yes",
+      "--json",
+      "--name",
+      "Json Init",
+      "--domain",
+      "json-init.example.test",
+      "--registry",
+      "ghcr.io/acme/json-init",
+      "--dokploy-url",
+      "https://dokploy.example.test",
+      "--dokploy-api-key",
+      "secret-token",
+    ]);
+    assert.equal(report.app.slug, "json-init");
+  } finally {
+    console.log = originalLog;
+  }
+
+  const json = output.join("\n");
+  const report = JSON.parse(json);
+  assert.equal(report.app.name, "Json Init");
+  assert.equal(report.app.dir, target);
+  assert.equal(report.deploy.dokployApiKeySet, true);
+  assert.equal(report.deploy.dokployUrl, "https://dokploy.example.test");
+  assert.equal(report.files.localEnv, ".nstack/local.env");
+  assert.deepEqual(report.localEnv.keys, [
+    "DOKPLOY_API_KEY",
+    "DOKPLOY_URL",
+    "NSTACK_DOMAIN",
+    "NSTACK_REGISTRY",
+  ]);
+  assert.doesNotMatch(json, /secret-token/);
+});
+
+test("configure --json reports link metadata without API key values", async () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "nstack-config-json-"));
+  const target = path.join(cwd, "app");
+  await runCli(["init", target, "--yes"]);
+
+  const output = [];
+  const originalLog = console.log;
+  const previousCwd = process.cwd();
+  process.chdir(target);
+  try {
+    console.log = (value = "") => output.push(String(value));
+    const report = await runCli([
+      "configure",
+      "--yes",
+      "--json",
+      "--domain",
+      "config-json.example.test",
+      "--registry",
+      "ghcr.io/acme/config-json",
+      "--dokploy-url",
+      "https://dokploy.example.test",
+      "--dokploy-api-key",
+      "secret-token",
+      "--project",
+      "Config Project",
+      "--environment",
+      "production",
+    ]);
+    assert.equal(report.app.slug, "app");
+  } finally {
+    console.log = originalLog;
+    process.chdir(previousCwd);
+  }
+
+  const json = output.join("\n");
+  const report = JSON.parse(json);
+  assert.equal(report.app.url, "https://config-json.example.test");
+  assert.equal(report.deploy.registry, "ghcr.io/acme/config-json");
+  assert.equal(report.deploy.dokployApiKeySet, true);
+  assert.equal(report.deploy.project, "Config Project");
+  assert.equal(report.deploy.environment, "production");
+  assert.equal(report.files.localEnv, ".nstack/local.env");
+  assert.doesNotMatch(json, /secret-token/);
+});
