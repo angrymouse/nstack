@@ -847,6 +847,93 @@ export const apiSecret = secret("API_SECRET");
   assert.equal(existsSync(path.join(cwd, ".nstack", "secrets.env")), false);
 });
 
+test("deploy configures Gitea source-backed Compose apps for push deployments", async () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "nstack-source-push-"));
+  mkdirSync(path.join(cwd, "backend", "api"), { recursive: true });
+  mkdirSync(path.join(cwd, "frontend"), { recursive: true });
+  writeFileSync(path.join(cwd, "nstack.config.mjs"), `export default {
+  app: { name: "Source Push", slug: "source-push" },
+  deploy: {
+    buildMode: "compose",
+    source: {
+      repository: "git@git.example.test:acme/source-push.git",
+      branch: "feature/push-deploy",
+      giteaId: "gitea-explicit",
+      composePath: "deploy/custom/compose.yaml",
+      watchPaths: ["backend/**", "frontend/**"]
+    }
+  },
+  verify: { endpoints: [] },
+};\n`);
+  writeFileSync(path.join(cwd, "backend", "api", "status.ts"), `export const ok = true;\n`);
+  writeFileSync(path.join(cwd, "backend", "Dockerfile"), "FROM scratch\n");
+  writeFileSync(path.join(cwd, "frontend", "Dockerfile"), "FROM scratch\n");
+
+  const envKeys = ["NSTACK_DOMAIN", "DOKPLOY_URL", "DOKPLOY_API_KEY"];
+  const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+  process.env.NSTACK_DOMAIN = "source-push.example.test";
+  process.env.DOKPLOY_URL = "https://dokploy.example.test";
+  process.env.DOKPLOY_API_KEY = "dummy";
+
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    const parsed = new URL(String(url));
+    const endpoint = parsed.pathname.replace(/^\/api\/(?:trpc\/)?/, "");
+    const body = init.body ? JSON.parse(init.body) : null;
+    calls.push({ endpoint, method: init.method || "GET", body });
+    if ((init.method || "GET") === "GET") {
+      if (endpoint === "gitProvider.getAll") return Response.json({ json: [] });
+      if (endpoint === "project.all" || endpoint === "environment.byProjectId" || endpoint === "compose.search" || endpoint === "domain.byComposeId" || endpoint === "schedule.list") {
+        return Response.json({ json: [] });
+      }
+    }
+    const ids = {
+      "project.create": { projectId: "project-1" },
+      "environment.create": { environmentId: "environment-1" },
+      "compose.create": { composeId: "compose-1" },
+      "domain.create": { domainId: "domain-1" },
+    };
+    return Response.json({ json: ids[endpoint] || {} });
+  };
+
+  try {
+    await deploy({
+      cwd,
+      noWait: true,
+      skipVerify: true,
+      skipStatus: true,
+      yes: true,
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const key of envKeys) {
+      if (originalEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = originalEnv[key];
+    }
+  }
+
+  const update = calls.find((call) => call.endpoint === "compose.update");
+  assert.equal(update.body.sourceType, "gitea");
+  assert.equal(update.body.giteaId, "gitea-explicit");
+  assert.equal(update.body.giteaOwner, "acme");
+  assert.equal(update.body.giteaRepository, "source-push");
+  assert.equal(update.body.giteaBranch, "feature/push-deploy");
+  assert.equal(update.body.composePath, "deploy/custom/compose.yaml");
+  assert.equal(update.body.autoDeploy, true);
+  assert.equal(update.body.triggerType, "push");
+  assert.deepEqual(update.body.watchPaths, ["backend/**", "frontend/**"]);
+
+  const save = calls.find((call) => call.endpoint === "compose.saveEnvironment");
+  const env = Object.fromEntries(save.body.env.trim().split("\n").map((line) => {
+    const index = line.indexOf("=");
+    return [line.slice(0, index), line.slice(index + 1)];
+  }));
+  assert.equal(env.NSTACK_BUILD_CONTEXT, "../..");
+  assert.equal(env.NSTACK_GIT_COMMIT, "acme/source-push@feature/push-deploy");
+  assert.equal(env.NSTACK_IMAGE_TAG, "source-feature-push-deploy");
+});
+
 test("deploy passes target platform to backend and frontend image builds", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "nstack-platform-build-"));
   const fakeBin = path.join(cwd, "bin");

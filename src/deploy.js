@@ -801,7 +801,7 @@ async function completeDeployConfig(config, cwd, options) {
         buildMode,
         platform,
         registry,
-        source: { repository, branch },
+        source: { ...config.deploy.source, repository, branch },
         provider: { ...config.deploy.provider, url, apiKey, serverId, projectName, environmentName },
       },
     };
@@ -1073,13 +1073,14 @@ function sourceBuildContext(config, release, { localContext = false } = {}) {
 }
 
 function composeBuildValues({ config, release, infraText, source = null }) {
+  const sourceBacked = source?.sourceType === "gitea";
   return {
     ENCORE_INFRA_CONFIG_B64: Buffer.from(infraText).toString("base64"),
-    NSTACK_BUILD_CONTEXT: source?.sourceType === "gitea"
+    NSTACK_BUILD_CONTEXT: sourceBacked
       ? "../.."
       : sourceBuildContextForEnv(config, release),
-    NSTACK_GIT_COMMIT: release.commit,
-    NSTACK_IMAGE_TAG: release.tag,
+    NSTACK_GIT_COMMIT: sourceBacked ? sourceRefLabel(source) : release.commit,
+    NSTACK_IMAGE_TAG: sourceBacked ? sourceImageTag(source) : release.tag,
   };
 }
 
@@ -1091,6 +1092,19 @@ function sourceBuildContextForEnv(config, release) {
     ? release.commit
     : config.deploy.source?.branch || "";
   return ref ? `${repository}#${ref}` : repository;
+}
+
+function sourceRefLabel(source) {
+  return [source.owner, source.repository].filter(Boolean).join("/")
+    + (source.branch ? `@${source.branch}` : "");
+}
+
+function sourceImageTag(source) {
+  const branch = String(source.branch || "branch")
+    .replace(/[^a-zA-Z0-9_.-]/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 96) || "branch";
+  return `source-${branch}`;
 }
 
 function safeOutput(command, args, cwd) {
