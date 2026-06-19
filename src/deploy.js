@@ -1413,8 +1413,6 @@ function deploymentArtifacts({ config, release, infraText = "", localContext = f
           dockerfile: config.paths.backendDockerfile,
           args: {
             ENCORE_INFRA_CONFIG_B64: "${ENCORE_INFRA_CONFIG_B64:?set ENCORE_INFRA_CONFIG_B64}",
-            NSTACK_GIT_COMMIT: "${NSTACK_GIT_COMMIT:-local}",
-            NSTACK_IMAGE_TAG: "${NSTACK_IMAGE_TAG:-local}",
           },
         },
         frontend: {

@@ -69,16 +69,15 @@ RUN --mount=type=cache,id=nstack-backend-runtime-apt,target=/var/cache/apt,shari
   && apt-get install -y --no-install-recommends ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
-ARG NSTACK_GIT_COMMIT=local
-ARG NSTACK_IMAGE_TAG=local
 ENV NODE_ENV=production
 ENV RUST_LOG=info
 ENV PORT=8080
 ENV ENCORE_INFRA_CONFIG_PATH=/encore/infra.config.json
 ENV ENCORE_APP_META_PATH=/encore/meta
 ENV ENCORE_RUNTIME_LIB=/encore/runtimes/js/encore-runtime.node
-ENV GIT_COMMIT=${NSTACK_GIT_COMMIT}
-ENV IMAGE_TAG=${NSTACK_IMAGE_TAG}
+ENV GIT_COMMIT=local
+ENV IMAGE_TAG=local
+ENV APP_VERSION=local
 
 COPY --from=build /workspace/backend/package.json ./package.json
 COPY --from=build /root/.encore/runtimes/js/encore.dev ./node_modules/encore.dev
@@ -86,58 +85,15 @@ COPY --from=build /workspace/backend/.encore/nstack/bundle ./.encore/build/combi
 COPY --from=build /workspace/backend/.encore/nstack/cron-runner ./.encore/nstack/cron-runner
 COPY --from=build /encore /encore
 
-RUN --mount=type=bind,source=.,target=/context,ro <<'EOF'
+RUN <<'EOF'
 set -eu
-mkdir -p /encore/nstack /usr/local/bin
-node <<'NODE'
-const fs = require("node:fs");
-const path = require("node:path");
-
-const gitDir = "/context/.git";
-let commit = process.env.NSTACK_GIT_COMMIT || "local";
-
-function read(file) {
-  try {
-    return fs.readFileSync(file, "utf8").trim();
-  } catch {
-    return "";
-  }
-}
-
-function isSha(value) {
-  return /^[0-9a-f]{40}$/i.test(value);
-}
-
-const head = read(path.join(gitDir, "HEAD"));
-if (isSha(head)) {
-  commit = head;
-} else if (head.startsWith("ref: ")) {
-  const ref = head.slice(5).trim();
-  const loose = read(path.join(gitDir, ref));
-  if (isSha(loose)) {
-    commit = loose;
-  } else {
-    for (const line of read(path.join(gitDir, "packed-refs")).split(/\n/)) {
-      const [sha, name] = line.trim().split(/\s+/);
-      if (name === ref && isSha(sha)) {
-        commit = sha;
-        break;
-      }
-    }
-  }
-}
-
-fs.writeFileSync("/encore/nstack/git-commit", `${commit}\n`);
-NODE
+mkdir -p /usr/local/bin
 cat > /usr/local/bin/nstack-backend-entrypoint <<'SH'
 #!/bin/sh
 set -eu
-if [ -s /encore/nstack/git-commit ]; then
-  GIT_COMMIT="$(cat /encore/nstack/git-commit)"
-  export GIT_COMMIT
-  APP_VERSION="$GIT_COMMIT"
-  export APP_VERSION
-fi
+: "${GIT_COMMIT:=local}"
+: "${APP_VERSION:=$GIT_COMMIT}"
+export GIT_COMMIT APP_VERSION
 exec node /workspace/backend/.encore/build/combined/combined/main.mjs
 SH
 chmod +x /usr/local/bin/nstack-backend-entrypoint

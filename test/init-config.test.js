@@ -112,7 +112,7 @@ test("init keeps deploy target values out of source config", async () => {
   assert.match(backendDockerfile, /find \.encore\/nstack -name '\*\.map' -delete/);
   assert.match(backendDockerfile, /ENV RUST_LOG=info/);
   assert.match(backendDockerfile, /COPY --from=build \/workspace\/backend\/\.encore\/nstack\/cron-runner/);
-  assert.match(backendDockerfile, /\/encore\/nstack\/git-commit/);
+  assert.doesNotMatch(backendDockerfile, /source=\\?\.git|target=\/context|git-commit/);
   assert.match(backendDockerfile, /nstack-backend-entrypoint/);
   assert.doesNotMatch(backendDockerfile, /--enable-source-maps/);
   assert.match(backendDockerfile, /ENTRYPOINT \["\/usr\/local\/bin\/nstack-backend-entrypoint"\]/);
