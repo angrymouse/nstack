@@ -31,6 +31,39 @@ test("verify honors --cwd", async () => {
   assert.deepEqual(output, ["Verified https://cwd-verify.example.test"]);
 });
 
+test("verify checks public endpoints concurrently", async () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "nstack-verify-parallel-"));
+  writeFileSync(path.join(cwd, "nstack.config.mjs"), `export default {
+    app: { name: "Verify Parallel", slug: "verify-parallel", domain: "parallel.example.test" },
+    verify: { timeoutSeconds: 1, endpoints: [
+      { name: "frontend", path: "/", expectStatus: 200 },
+      { name: "api", path: "/api/status", expectStatus: 200 }
+    ] }
+  };\n`);
+
+  const originalFetch = globalThis.fetch;
+  const originalLog = console.log;
+  let inFlight = 0;
+  let parallelSeen = false;
+  try {
+    globalThis.fetch = async () => {
+      inFlight += 1;
+      if (inFlight > 1) parallelSeen = true;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      inFlight -= 1;
+      return new Response("ok", { status: 200 });
+    };
+    console.log = () => {};
+
+    await runCli(["verify", "--cwd", cwd]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    console.log = originalLog;
+  }
+
+  assert.equal(parallelSeen, true);
+});
+
 test("cli accepts --cwd before the command", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "nstack-leading-cwd-"));
   writeFileSync(path.join(cwd, "nstack.config.mjs"), `export default {

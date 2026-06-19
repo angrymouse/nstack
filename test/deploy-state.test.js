@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -1475,8 +1476,123 @@ test("wait verifies the latest attempt and promotes lastRelease", async () => {
   const state = JSON.parse(readFileSync(path.join(cwd, ".nstack", "state.json"), "utf8"));
   assert.equal(state.lastRelease.tag, "wait-tag");
   assert.equal(state.lastAttempt.status, "verified");
-  assert.equal(state.lastAttempt.triggeredAt, "2026-06-18T00:01:00.000Z");
+  assert.equal(state.lastAttempt.triggeredAt, "2026-06-18T00:02:00.000Z");
   assert.match(state.lastAttempt.verifiedAt, /^\d{4}-\d{2}-\d{2}T/);
+});
+
+test("wait for source-backed apps gates validation on the pushed Dokploy deployment", async () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "nstack-wait-source-push-"));
+  mkdirSync(path.join(cwd, ".nstack"), { recursive: true });
+  mkdirSync(path.join(cwd, "backend", "api"), { recursive: true });
+  writeFileSync(path.join(cwd, "nstack.config.mjs"), `export default {
+  app: { name: "Wait Source", slug: "wait-source" },
+  paths: { backend: "backend", frontend: "frontend", frontendDockerfile: "frontend/Dockerfile" },
+  deploy: {
+    source: {
+      sourceType: "gitea",
+      giteaId: "gitea-1",
+      repository: "git@git.example.test:acme/wait-source.git",
+      branch: "main"
+    }
+  },
+  verify: { endpoints: [{ name: "status", path: "/api/status", expectStatus: 200, expectCommit: true }] },
+};\n`);
+  writeFileSync(path.join(cwd, "backend", "api", "status.ts"), `export const ok = true;\n`);
+  writeFileSync(path.join(cwd, ".nstack", "state.json"), `${JSON.stringify({
+    dokploy: {
+      projectId: "project-1",
+      environmentId: "environment-1",
+      composeId: "compose-1",
+    },
+    lastRelease: {
+      commit: "oldcommit",
+      tag: "oldtag",
+      builtAt: "2026-06-18T00:00:00.000Z",
+    },
+  }, null, 2)}\n`);
+  execFileSync("git", ["init"], { cwd, stdio: "ignore" });
+  execFileSync("git", ["config", "user.email", "nstack@example.test"], { cwd });
+  execFileSync("git", ["config", "user.name", "nstack"], { cwd });
+  writeFileSync(path.join(cwd, "README.md"), "source push\n");
+  execFileSync("git", ["add", "."], { cwd });
+  execFileSync("git", ["commit", "-m", "source push"], { cwd, stdio: "ignore" });
+  const currentCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8" }).trim();
+
+  const envKeys = ["NSTACK_DOMAIN", "DOKPLOY_URL", "DOKPLOY_API_KEY"];
+  const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+  process.env.NSTACK_DOMAIN = "wait-source.example.test";
+  process.env.DOKPLOY_URL = "https://dokploy.example.test";
+  process.env.DOKPLOY_API_KEY = "dummy";
+
+  let deploymentPolls = 0;
+  let matchingDeploymentDone = false;
+  let publicCalls = 0;
+  const output = [];
+  const originalFetch = globalThis.fetch;
+  const originalLog = console.log;
+  globalThis.fetch = async (url) => {
+    const parsed = new URL(String(url));
+    if (parsed.hostname === "wait-source.example.test") {
+      publicCalls += 1;
+      assert.equal(matchingDeploymentDone, true);
+      assert.equal(parsed.pathname, "/api/status");
+      return new Response("running acme/wait-source@main", { status: 200 });
+    }
+    const endpoint = parsed.pathname.replace(/^\/api\/(?:trpc\/)?/, "");
+    if (endpoint === "deployment.allByCompose") {
+      deploymentPolls += 1;
+      if (deploymentPolls === 1) {
+        return Response.json({ json: [
+          { deploymentId: "old-deploy", status: "done", createdAt: "2026-06-18T00:00:00.000Z", description: "Commit: oldcommit" },
+        ] });
+      }
+      const status = deploymentPolls === 2 ? "running" : "done";
+      matchingDeploymentDone = status === "done";
+      return Response.json({ json: [
+        { deploymentId: "new-deploy", status, createdAt: "2026-06-18T00:02:00.000Z", title: "source push", description: `Commit: ${currentCommit}` },
+        { deploymentId: "old-deploy", status: "done", createdAt: "2026-06-18T00:00:00.000Z", description: "Commit: oldcommit" },
+      ] });
+    }
+    if (endpoint === "compose.one") {
+      return Response.json({ json: {
+        composeId: "compose-1",
+        name: "wait-source-app",
+        composeFile: "services:\n  backend:\n    build: ./backend\n  frontend:\n    build: ./frontend\n",
+        env: "",
+      } });
+    }
+    if (endpoint === "domain.byComposeId") {
+      return Response.json({ json: [
+        { domainId: "domain-1", host: "wait-source.example.test", path: "/", serviceName: "frontend", port: 3000, https: true },
+        { domainId: "domain-2", host: "wait-source.example.test", path: "/api", serviceName: "backend", port: 8080, https: true, stripPath: true },
+      ] });
+    }
+    if (endpoint === "schedule.list") return Response.json({ json: [] });
+    if (endpoint === "settings.health") return Response.json({ json: { status: "ok" } });
+    return Response.json({ json: {} });
+  };
+
+  try {
+    console.log = (line = "") => output.push(String(line));
+    const report = await waitForDeployment({ cwd, json: true, statusIntervalMs: 1 });
+    assert.equal(report.release.commit, currentCommit);
+    assert.equal(report.state.lastRelease.commit, currentCommit);
+    assert.equal(report.state.lastAttempt.status, "verified");
+    assert.equal(report.state.lastAttempt.triggeredAt, "2026-06-18T00:02:00.000Z");
+    assert.equal(report.timings.steps.some((step) => step.name === "dokploy: wait deployment"), true);
+  } finally {
+    console.log = originalLog;
+    globalThis.fetch = originalFetch;
+    for (const key of envKeys) {
+      if (originalEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = originalEnv[key];
+    }
+  }
+
+  assert.equal(publicCalls, 1);
+  assert.equal(deploymentPolls, 4);
+  const report = JSON.parse(output.join("\n"));
+  assert.equal(report.release.commit, currentCommit);
 });
 
 test("wait refuses to promote when public verification is skipped", async () => {

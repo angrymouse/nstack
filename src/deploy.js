@@ -38,6 +38,8 @@ import { ensureDir, fileExists, randomSecret, run, commandOutput, writeText, mer
 const releaseManifestName = "release.json";
 const releaseManifestSchema = "nstack.release.v1";
 const maxReleaseHistory = 20;
+const defaultValidationPollMs = 250;
+const maxValidationPollMs = 1000;
 
 export async function configure(options = {}) {
   const cwd = options.cwd || process.cwd();
@@ -254,6 +256,7 @@ export async function deploy(options = {}) {
   nextState.lastAttempt = releaseAttempt(release, { status: "triggering" });
   persistFullState();
 
+  let checks = { deployment: null, timings: [] };
   try {
     await provider.deploy(composeId, release);
     nextState.lastAttempt = releaseAttempt(release, {
@@ -280,7 +283,8 @@ export async function deploy(options = {}) {
       return report;
     }
 
-    await runReleaseChecks(cwd, config, release, options);
+    checks = await runReleaseChecks(cwd, config, release, options);
+    timings.push(...checks.timings);
   } catch (error) {
     nextState.lastAttempt = releaseAttempt(release, {
       status: "failed",
@@ -293,7 +297,7 @@ export async function deploy(options = {}) {
   }
 
   finalizeReleaseState(nextState, release, options, {
-    triggeredAt: nextState.lastAttempt.triggeredAt,
+    triggeredAt: deploymentTriggeredAt(checks.deployment) || nextState.lastAttempt.triggeredAt,
   });
   persistFullState();
 
@@ -320,19 +324,22 @@ export async function waitForDeployment(options = {}) {
   assertWaitCanPromote(options);
   const config = await loadConfig(cwd, { target: targetFromOptions(options) });
   const state = loadState(cwd, config.deploy.target);
-  const release = releaseFromState(state);
+  const release = releaseForWait(config, cwd, state);
 
-  await runReleaseChecks(cwd, config, release, options);
+  const checks = await runReleaseChecks(cwd, config, release, {
+    ...options,
+    requireDeploymentMatch: isSourceBackedCompose(config) || options.requireDeploymentMatch,
+  });
   const nextState = {
     ...state,
     dokploy: { ...(state.dokploy || {}) },
   };
   finalizeReleaseState(nextState, release, options, {
-    triggeredAt: state.lastAttempt?.triggeredAt,
+    triggeredAt: deploymentTriggeredAt(checks.deployment) || state.lastAttempt?.triggeredAt,
   });
   saveState(nextState, cwd, config.deploy.target);
 
-  const report = waitReport({ config, release, state: nextState });
+  const report = waitReport({ config, release, state: nextState, timings: checks.timings });
   if (options.json) console.log(JSON.stringify(report, null, 2));
   else printWait({ config, release });
   return report;
@@ -581,18 +588,31 @@ function summarizeError(error) {
 }
 
 async function runReleaseChecks(cwd, config, release, options = {}) {
+  const timings = [];
+  let deployment = null;
+  let publicReport = null;
+  let statusReport = null;
+  if (!options.skipStatus) {
+    deployment = await timedAsync("dokploy: wait deployment", true, timings, () => waitForDokployDeployment(cwd, config, release, {
+      requireMatch: options.requireDeploymentMatch,
+      timeoutMs: options.statusTimeoutMs || options.timeoutMs,
+      intervalMs: options.statusIntervalMs || options.intervalMs,
+    }));
+  }
   if (!options.skipVerify) {
-    await verify({ config, release, quiet: options.json });
+    publicReport = await timedAsync("verify: public endpoints", true, timings, () =>
+      verify({ config, release, quiet: options.json, intervalMs: options.verifyIntervalMs || options.statusIntervalMs || options.intervalMs }));
   }
   if (!options.skipStatus) {
-    await auditPostDeployStatus(cwd, {
+    statusReport = await timedAsync("dokploy: status audit", true, timings, () => auditPostDeployStatus(cwd, {
       target: config.deploy.target,
       timeoutMs: options.statusTimeoutMs,
       intervalMs: options.statusIntervalMs,
       timeoutSeconds: config.verify.timeoutSeconds,
       quiet: options.json,
-    });
+    }));
   }
+  return { deployment, publicReport, statusReport, timings };
 }
 
 function assertWaitCanPromote(options = {}) {
@@ -723,11 +743,122 @@ function releaseFromState(state) {
   };
 }
 
+function releaseForWait(config, cwd, state) {
+  if (isSourceBackedCompose(config)) {
+    const current = releaseInfo(config, cwd);
+    if (current.commit && current.commit !== "local") return current;
+  }
+  return releaseFromState(state);
+}
+
+function deploymentForRelease(deployments, release) {
+  return deployments.find((deployment) => deploymentMatchesRelease(deployment, release)) || null;
+}
+
+function deploymentMatchesRelease(deployment, release) {
+  const text = [
+    deployment?.id,
+    deployment?.title,
+    deployment?.description,
+  ].filter(Boolean).join(" ").toLowerCase();
+  const commit = String(release?.commit || "").toLowerCase();
+  const tag = String(release?.tag || "").toLowerCase();
+  return Boolean(
+    (commit && commit !== "local" && text.includes(commit)) ||
+    (tag && tag !== "local" && text.includes(tag)),
+  );
+}
+
+function isActiveDeployment(deployment) {
+  const status = String(deployment?.status || "").toLowerCase();
+  return /running|queued?|building|deploying|pending|progress|processing|created|started/.test(status);
+}
+
+function isFailedDeployment(deployment) {
+  const status = String(deployment?.status || "").toLowerCase();
+  return /fail|error|cancel|killed|dead|terminated/.test(status);
+}
+
+function deploymentFailedError(deployment) {
+  const error = new Error(`Dokploy deployment ${deployment?.id || deployment?.title || "latest"} failed with status ${deployment?.status || "unknown"}.`);
+  error.code = "NSTACK_DOKPLOY_DEPLOYMENT_FAILED";
+  return error;
+}
+
+function isDeploymentFailureError(error) {
+  return error?.code === "NSTACK_DOKPLOY_DEPLOYMENT_FAILED";
+}
+
+function deploymentWaitTimeoutError({ release, deployments, error }) {
+  const expected = [release?.commit, release?.tag].filter(Boolean).join(" / ") || "current release";
+  const latest = deployments?.[0]
+    ? `${deployments[0].id || deployments[0].title || "latest"} ${deployments[0].status || "unknown"} ${deployments[0].description || ""}`.trim()
+    : "none";
+  const detail = error ? ` Last Dokploy error: ${error instanceof Error ? error.message : String(error)}` : "";
+  return new Error(`Timed out waiting for Dokploy deployment for ${expected}. Latest deployment: ${latest}.${detail}`);
+}
+
+function deploymentTriggeredAt(deployment) {
+  return deployment?.startedAt || deployment?.createdAt || "";
+}
+
+function validationPollDelay(poll, baseIntervalMs = defaultValidationPollMs) {
+  const base = Math.max(1, Number(baseIntervalMs) || defaultValidationPollMs);
+  const multiplier = Math.min(4, 2 ** Math.max(0, poll));
+  return Math.min(maxValidationPollMs, base * multiplier);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForDokployDeployment(cwd, config, release, options = {}) {
+  if (!config.deploy.provider.url || !config.deploy.provider.apiKey) return null;
+  const state = loadState(cwd, config.deploy.target);
+  const composeId = state.dokploy?.composeId || "";
+  if (!composeId) return null;
+
+  const provider = new DokployProvider({ config, state });
+  const timeoutMs = Number(options.timeoutMs || config.verify.timeoutSeconds * 1000 || 120_000);
+  const baseIntervalMs = Number(options.intervalMs || defaultValidationPollMs);
+  const requireMatch = Boolean(options.requireMatch);
+  const deadline = Date.now() + Math.max(0, timeoutMs);
+  let lastDeployments = [];
+  let lastError = null;
+  let poll = 0;
+
+  for (;;) {
+    try {
+      lastDeployments = await provider.listComposeDeployments(composeId);
+      const relevant = deploymentForRelease(lastDeployments, release);
+      const active = lastDeployments.find(isActiveDeployment);
+      const deployment = relevant || (requireMatch ? null : active);
+      if (deployment) {
+        if (isFailedDeployment(deployment)) throw deploymentFailedError(deployment);
+        if (!isActiveDeployment(deployment)) return deployment;
+      } else if (!requireMatch) {
+        return null;
+      }
+    } catch (error) {
+      if (isDeploymentFailureError(error)) throw error;
+      lastError = error;
+      if (!requireMatch) return null;
+    }
+
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      throw deploymentWaitTimeoutError({ release, deployments: lastDeployments, error: lastError });
+    }
+    await sleep(Math.min(validationPollDelay(poll++, baseIntervalMs), remaining));
+  }
+}
+
 async function auditPostDeployStatus(cwd, options = {}) {
   const timeoutMs = Number(options.timeoutMs || options.timeoutSeconds * 1000 || 120_000);
-  const intervalMs = Number(options.intervalMs || 3_000);
+  const intervalMs = Number(options.intervalMs || defaultValidationPollMs);
   const deadline = Date.now() + Math.max(0, timeoutMs);
   let lastError = null;
+  let poll = 0;
 
   for (;;) {
     const report = await createStatusReport({ cwd, target: options.target });
@@ -739,7 +870,7 @@ async function auditPostDeployStatus(cwd, options = {}) {
     lastError = error;
     const remaining = deadline - Date.now();
     if (remaining <= 0) throw lastError;
-    await new Promise((resolve) => setTimeout(resolve, Math.min(intervalMs, remaining)));
+    await sleep(Math.min(validationPollDelay(poll++, intervalMs), remaining));
   }
 }
 
@@ -950,7 +1081,7 @@ function normalizeGitRepositoryUrl(value) {
   return `https://${ssh[1]}/${ssh[2]}`;
 }
 
-export async function verify({ config = null, release = null, cwd = process.cwd(), target = "", quiet = false, json = false } = {}) {
+export async function verify({ config = null, release = null, cwd = process.cwd(), target = "", quiet = false, json = false, intervalMs = defaultValidationPollMs } = {}) {
   const loadedConfig = config || await loadConfig(cwd, { target });
   const state = loadState(cwd, loadedConfig.deploy.target);
   const loadedRelease = release || state.lastAttempt || state.lastRelease || releaseInfo(loadedConfig, cwd);
@@ -958,6 +1089,7 @@ export async function verify({ config = null, release = null, cwd = process.cwd(
   const base = `https://${loadedConfig.app.domain}`;
   const deadline = Date.now() + Math.max(0, loadedConfig.verify.timeoutSeconds * 1000);
   let report = null;
+  let poll = 0;
   for (;;) {
     report = await verifyReport(loadedConfig, loadedRelease, base, { expectedCommit });
     if (report.ok) {
@@ -967,17 +1099,15 @@ export async function verify({ config = null, release = null, cwd = process.cwd(
     }
     const remaining = deadline - Date.now();
     if (remaining <= 0) break;
-    await new Promise((resolve) => setTimeout(resolve, Math.min(3000, remaining)));
+    await sleep(Math.min(validationPollDelay(poll++, intervalMs), remaining));
   }
   if (json && !quiet) console.log(JSON.stringify(report, null, 2));
   throw verifyReportError(report, base);
 }
 
 async function verifyReport(config, release, base, options = {}) {
-  const endpoints = [];
-  for (const endpoint of config.verify.endpoints) {
-    endpoints.push(await verifyEndpoint(base, endpoint, release, options));
-  }
+  const endpoints = await Promise.all(config.verify.endpoints
+    .map((endpoint) => verifyEndpoint(base, endpoint, release, options)));
   const failed = endpoints.find((endpoint) => !endpoint.ok);
   return {
     ok: !failed,
@@ -1417,8 +1547,8 @@ function summarizeTimings(timings) {
   };
 }
 
-function waitReport({ config, release, state }) {
-  return {
+function waitReport({ config, release, state, timings = [] }) {
+  const report = {
     mode: "wait",
     app: {
       name: config.app.name,
@@ -1442,6 +1572,8 @@ function waitReport({ config, release, state }) {
       releases: Array.isArray(state.releases) ? state.releases : [],
     },
   };
+  if (timings.length) report.timings = summarizeTimings(timings);
+  return report;
 }
 
 function redeployReport({ config, release, state }) {
