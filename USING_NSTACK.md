@@ -917,7 +917,21 @@ nstack deploy
 nstack wait
 nstack redeploy
 nstack rollback [tag-or-commit]
+nstack undeploy --yes
+nstack cleanup
 ```
+
+Remove a deployed app from Dokploy:
+
+```sh
+nstack undeploy --yes
+```
+
+This deletes the app's Dokploy domains, schedules, Compose service, managed
+Postgres, managed Redis-compatible cache, and the Dokploy project when it is
+empty after service deletion. It then asks Dokploy to prune stopped containers,
+unused images, unused volumes, and Docker builder cache. Local app runtime
+secrets stay in `.nstack/`.
 
 Runtime env:
 

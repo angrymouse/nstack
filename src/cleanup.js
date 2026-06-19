@@ -16,7 +16,10 @@ export async function cleanup(options = {}) {
   const provider = new DokployProvider({ config, state });
   const timings = [];
   await timed("dokploy: enable docker cleanup", timings, () => provider.enableDockerCleanup());
+  await timed("dokploy: prune stopped containers", timings, () => provider.cleanStoppedContainers());
   await timed("dokploy: prune unused images", timings, () => provider.cleanUnusedImages());
+  await timed("dokploy: prune unused volumes", timings, () => provider.cleanUnusedVolumes());
+  await timed("dokploy: prune docker builder cache", timings, () => provider.cleanDockerBuilder());
 
   const report = {
     app: {
@@ -32,7 +35,10 @@ export async function cleanup(options = {}) {
     },
     cleanup: {
       dockerCleanupEnabled: true,
+      stoppedContainersPruned: true,
       unusedImagesPruned: true,
+      unusedVolumesPruned: true,
+      dockerBuilderCachePruned: true,
     },
     timings: summarizeTimings(timings),
   };
@@ -41,7 +47,10 @@ export async function cleanup(options = {}) {
   } else {
     console.log(`Cleanup complete for ${config.app.slug}`);
     console.log(`  docker cleanup: enabled`);
+    console.log(`  stopped containers: pruned`);
     console.log(`  unused images: pruned`);
+    console.log(`  unused volumes: pruned`);
+    console.log(`  docker builder cache: pruned`);
     console.log(`  time: ${(report.timings.total_ms / 1000).toFixed(2)}s`);
   }
   return report;

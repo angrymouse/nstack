@@ -44,12 +44,17 @@ deploy is running.
 nstack doctor
 nstack pull
 nstack rollback
+nstack undeploy --yes
+nstack cleanup
 nstack open dashboard
 ```
 
 The generated app only exposes `dev`, `build`, `check`, `deploy`, and `status`
 as package scripts. The rest stays in the `nstack` CLI so new projects do not
 start with a wall of commands.
+
+`nstack cleanup` uses Dokploy cleanup endpoints for stopped containers, unused
+images, unused volumes, and Docker builder cache.
 
 For the detailed operator guide, see [USING_NSTACK.md](USING_NSTACK.md).
 

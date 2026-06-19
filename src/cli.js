@@ -20,6 +20,7 @@ import { pull } from "./pull.js";
 import { runSecretCommand } from "./secrets.js";
 import { showStatus } from "./status.js";
 import { listTargets } from "./targets.js";
+import { undeploy } from "./undeploy.js";
 import { commandOutput, copyTree, ensureDir, fileExists, mergeEnvFile, readJSON, removeIfExists, slugify } from "./util.js";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -104,6 +105,7 @@ export async function runCli(argv) {
   if (command === "logs" || command === "log") return logs(args, options);
   if (command === "cancel" || command === "cancel-deployment") return cancelDeployment(args, options);
   if (command === "cleanup" || command === "clean") return cleanup(options);
+  if (command === "undeploy" || command === "destroy") return undeploy(options);
   if (command === "open") return openTarget(args, options);
   if (command === "env" || command === "secret" || command === "secrets") return runSecretCommand(args, options);
   if (command === "build") return deploy({ ...options, buildOnly: true, skipVerify: true, skipStatus: true });
@@ -559,7 +561,8 @@ When needed:
   nstack doctor                  explain missing local setup
   nstack pull                    recover local state from Dokploy
   nstack rollback [tag|commit]   deploy a previous verified release
-  nstack cleanup                 enable Dokploy cleanup and prune unused images
+  nstack undeploy                delete this app's Dokploy resources
+  nstack cleanup                 prune stopped containers, images, volumes, and build cache
   nstack open [dashboard]        open the app or Dokploy dashboard
 
 Options:

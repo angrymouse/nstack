@@ -95,13 +95,19 @@ test("Dokploy maintenance enables cleanup and prunes unused images", async () =>
     });
 
     await provider.enableDockerCleanup();
+    await provider.cleanStoppedContainers();
     await provider.cleanUnusedImages();
+    await provider.cleanUnusedVolumes();
+    await provider.cleanDockerBuilder();
   } finally {
     globalThis.fetch = originalFetch;
   }
 
   assert.deepEqual(calls.map((call) => [call.method, call.path, call.body]), [
     ["POST", "/api/settings.updateDockerCleanup", { enableDockerCleanup: true, serverId: "server-1" }],
+    ["POST", "/api/settings.cleanStoppedContainers", { serverId: "server-1" }],
     ["POST", "/api/settings.cleanUnusedImages", { serverId: "server-1" }],
+    ["POST", "/api/settings.cleanUnusedVolumes", { serverId: "server-1" }],
+    ["POST", "/api/settings.cleanDockerBuilder", { serverId: "server-1" }],
   ]);
 });

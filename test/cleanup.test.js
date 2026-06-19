@@ -36,9 +36,12 @@ test("cleanup enables Dokploy cleanup and prunes unused images", async () => {
     console.log = (line = "") => output.push(String(line));
     const report = await runCli(["--cwd", cwd, "cleanup", "--json"]);
     assert.equal(report.cleanup.dockerCleanupEnabled, true);
+    assert.equal(report.cleanup.stoppedContainersPruned, true);
     assert.equal(report.cleanup.unusedImagesPruned, true);
+    assert.equal(report.cleanup.unusedVolumesPruned, true);
+    assert.equal(report.cleanup.dockerBuilderCachePruned, true);
     assert.equal(report.deploy.serverId, "server-1");
-    assert.equal(report.timings.steps.length, 2);
+    assert.equal(report.timings.steps.length, 5);
   } finally {
     console.log = originalLog;
     globalThis.fetch = originalFetch;
@@ -46,8 +49,12 @@ test("cleanup enables Dokploy cleanup and prunes unused images", async () => {
 
   assert.deepEqual(calls.map((call) => [call.method, call.path, call.body]), [
     ["POST", "/api/settings.updateDockerCleanup", { enableDockerCleanup: true, serverId: "server-1" }],
+    ["POST", "/api/settings.cleanStoppedContainers", { serverId: "server-1" }],
     ["POST", "/api/settings.cleanUnusedImages", { serverId: "server-1" }],
+    ["POST", "/api/settings.cleanUnusedVolumes", { serverId: "server-1" }],
+    ["POST", "/api/settings.cleanDockerBuilder", { serverId: "server-1" }],
   ]);
   const json = JSON.parse(output.join("\n"));
   assert.equal(json.cleanup.unusedImagesPruned, true);
+  assert.equal(json.cleanup.dockerBuilderCachePruned, true);
 });

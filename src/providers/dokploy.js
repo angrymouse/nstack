@@ -401,11 +401,101 @@ export class DokployProvider {
     });
   }
 
+  async cleanUnusedVolumes() {
+    return this.client.apiPost("settings.cleanUnusedVolumes", {
+      ...serverPart(this.config),
+    });
+  }
+
+  async cleanStoppedContainers() {
+    return this.client.apiPost("settings.cleanStoppedContainers", {
+      ...serverPart(this.config),
+    });
+  }
+
+  async cleanDockerBuilder() {
+    return this.client.apiPost("settings.cleanDockerBuilder", {
+      ...serverPart(this.config),
+    });
+  }
+
   async enableDockerCleanup() {
     return this.client.apiPost("settings.updateDockerCleanup", {
       enableDockerCleanup: true,
       ...serverPart(this.config),
     });
+  }
+
+  async deleteComposeDomains(composeId) {
+    if (!composeId) return [];
+    const domains = asList(await ignoreNotFound(() => this.client.apiGet("domain.byComposeId", { composeId }), []));
+    const deleted = [];
+    for (const domain of domains) {
+      const domainId = idOf(domain, ["domainId", "id"]);
+      if (!domainId) continue;
+      const removed = await ignoreNotFound(() => this.client.apiPost("domain.delete", { domainId }), false);
+      if (removed !== false) deleted.push(summarizeDomain(domain));
+    }
+    return deleted;
+  }
+
+  async deleteComposeSchedules(composeId, scheduleIds = []) {
+    if (!composeId && scheduleIds.length === 0) return [];
+    const listed = composeId
+      ? asList(await ignoreNotFound(() => this.client.apiGet("schedule.list", { id: composeId, scheduleType: "compose" }), []))
+      : [];
+    const byId = new Map();
+    for (const schedule of listed) {
+      const scheduleId = idOf(schedule, ["scheduleId", "id"]);
+      if (scheduleId) byId.set(scheduleId, schedule);
+    }
+    for (const scheduleId of scheduleIds.filter(Boolean)) {
+      if (!byId.has(scheduleId)) byId.set(scheduleId, { scheduleId });
+    }
+
+    const deleted = [];
+    for (const [scheduleId, schedule] of byId.entries()) {
+      const removed = await ignoreNotFound(() => this.client.apiPost("schedule.delete", { scheduleId }), false);
+      if (removed !== false) deleted.push(summarizeSchedule(schedule));
+    }
+    return deleted;
+  }
+
+  async deleteCompose(composeId, { deleteVolumes = true } = {}) {
+    if (!composeId) return false;
+    const result = await ignoreNotFound(() => this.client.apiPost("compose.delete", { composeId, deleteVolumes }), false);
+    return result !== false;
+  }
+
+  async removePostgres(postgresId) {
+    if (!postgresId) return false;
+    const result = await ignoreNotFound(() => this.client.apiPost("postgres.remove", { postgresId }), false);
+    return result !== false;
+  }
+
+  async removeRedis(redisId) {
+    if (!redisId) return false;
+    const result = await ignoreNotFound(() => this.client.apiPost("redis.remove", { redisId }), false);
+    return result !== false;
+  }
+
+  async removeProject(projectId) {
+    if (!projectId) return false;
+    const result = await ignoreNotFound(() => this.client.apiPost("project.remove", { projectId }), false);
+    return result !== false;
+  }
+
+  async projectHasServices(projectId) {
+    if (!projectId) return false;
+    const project = await this.findProjectRecord(projectId);
+    if (!project) return false;
+    return asList(project.environments).some((environment) => environmentServiceCount(environment) > 0);
+  }
+
+  async findProjectRecord(projectId) {
+    if (!projectId) return null;
+    return asList(await this.client.apiGet("project.all"))
+      .find((project) => idOf(project, ["projectId", "id"]) === projectId) || null;
   }
 
   async pullExistingState(resources = {}) {
@@ -945,6 +1035,20 @@ function isUnknownEndpoint(error) {
   return /compose\.saveEnvironment.*(?:404|NOT_FOUND|Cannot\s+(?:POST|GET)|not found)/i.test(message);
 }
 
+function isNotFoundError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /(?:404|NOT_FOUND|not found)/i.test(message);
+}
+
+async function ignoreNotFound(fn, fallback) {
+  try {
+    return await fn();
+  } catch (error) {
+    if (isNotFoundError(error)) return fallback;
+    throw error;
+  }
+}
+
 async function capture(fn) {
   try {
     return { ok: true, value: await fn() };
@@ -1141,4 +1245,17 @@ function asList(value) {
     if (Array.isArray(value[key])) return value[key];
   }
   return Object.values(value).find(Array.isArray) || [];
+}
+
+function environmentServiceCount(environment = {}) {
+  return [
+    "applications",
+    "compose",
+    "postgres",
+    "mysql",
+    "mariadb",
+    "redis",
+    "mongo",
+    "libsql",
+  ].reduce((count, key) => count + asList(environment[key]).length, 0);
 }
