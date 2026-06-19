@@ -9,8 +9,7 @@ export default {
   verify: {
     timeoutSeconds: 120,
     endpoints: [
-      { name: "frontend", path: "/", expectStatus: 200, rejectText: ["fetch failed", "Nuxt instance unavailable"] },
-      { name: "status", path: "/api/status", expectStatus: 200, expectCommit: true },
+      { name: "ready", path: "/api/ready", expectStatus: 200, expectCommit: true },
     ],
   },
 };

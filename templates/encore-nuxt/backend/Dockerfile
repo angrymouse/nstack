@@ -11,6 +11,7 @@ RUN corepack enable && corepack prepare pnpm@10.18.3 --activate
 
 ENV PATH="/root/.encore/bin:${PATH}"
 ENV ENCORE_INFRA_CONFIG_PATH=/encore/infra.config.json
+ENV ENCORE_TELEMETRY_DISABLED=1
 
 ARG TARGETARCH=amd64
 ARG ENCORE_VERSION=1.57.8
@@ -43,21 +44,19 @@ COPY backend ./backend
 COPY scripts/nstack-cron-runner.mjs ./scripts/nstack-cron-runner.mjs
 
 ARG ENCORE_INFRA_CONFIG_B64
-RUN mkdir -p /encore \
-  && node -e 'const fs = require("fs"); const data = process.env.ENCORE_INFRA_CONFIG_B64 || ""; if (!data) throw new Error("ENCORE_INFRA_CONFIG_B64 is required"); fs.writeFileSync("/encore/infra.config.json", Buffer.from(data, "base64"));'
-
 WORKDIR /workspace/backend
-RUN encore gen wrappers
-RUN mkdir -p .encore/nstack/cron-runner \
+RUN mkdir -p /encore .encore/nstack/cron-runner \
+  && node -e 'const fs = require("fs"); const data = process.env.ENCORE_INFRA_CONFIG_B64 || ""; if (!data) throw new Error("ENCORE_INFRA_CONFIG_B64 is required"); fs.writeFileSync("/encore/infra.config.json", Buffer.from(data, "base64"));' \
+  && encore gen wrappers \
   && encore debug meta -f json > .encore/nstack/meta.json \
   && node ../scripts/nstack-cron-runner.mjs .encore/nstack/meta.json encore.gen/internal/entrypoints/combined/main.ts encore.gen/internal/entrypoints/combined/nstack-cron-runner.ts \
   && if [ -f encore.gen/internal/entrypoints/combined/nstack-cron-runner.ts ]; then \
     tsbundler-encore --bundle --engine=node:22 --outdir=.encore/nstack/cron-runner encore.gen/internal/entrypoints/combined/nstack-cron-runner.ts; \
-  fi
-RUN tsbundler-encore --bundle --engine=node:22 --outdir=.encore/nstack/bundle encore.gen/internal/entrypoints/combined/main.ts
-RUN find .encore/nstack -name '*.map' -delete
-RUN encore debug meta -f proto > /encore/meta
-RUN mkdir -p /encore/runtimes/js \
+  fi \
+  && tsbundler-encore --bundle --engine=node:22 --outdir=.encore/nstack/bundle encore.gen/internal/entrypoints/combined/main.ts \
+  && find .encore/nstack -name '*.map' -delete \
+  && encore debug meta -f proto > /encore/meta \
+  && mkdir -p /encore/runtimes/js \
   && cp /root/.encore/runtimes/js/encore-runtime.node /encore/runtimes/js/encore-runtime.node \
   && cp -R /root/.encore/runtimes/js/encore.dev /encore/runtimes/js/encore.dev
 

@@ -111,7 +111,7 @@ test("compose renderer provisions RustFS for Encore object storage buckets", () 
   assert.match(output, /command:\n\s+- "-c"\n\s+- "until mc alias set local/);
   assert.match(output, /mc mb --ignore-existing local\/bucket-app-uploads/);
   assert.match(output, /mc anonymous set download local\/bucket-app-public-assets/);
-  assert.match(output, /backend:[\s\S]*depends_on:[\s\S]*rustfs-init:[\s\S]*condition: "service_completed_successfully"/);
+  assert.doesNotMatch(output, /backend:[\s\S]*depends_on:[\s\S]*rustfs-init:[\s\S]*condition: "service_completed_successfully"/);
   assert.match(output, /rustfs_data: \{\}/);
 });
 

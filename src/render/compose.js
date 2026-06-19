@@ -137,10 +137,6 @@ export function renderDokployCompose(ctx) {
         [OBJECT_STORAGE_SERVICE_NAME]: { condition: "service_started" },
       },
     };
-    doc.services.backend.depends_on = {
-      ...(doc.services.backend.depends_on || {}),
-      [OBJECT_STORAGE_INIT_SERVICE_NAME]: { condition: "service_completed_successfully" },
-    };
     if (resources.buckets.some((bucket) => bucket.public)) {
       doc.services[OBJECT_STORAGE_PUBLIC_SERVICE_NAME] = {
         image: OBJECT_STORAGE_PUBLIC_IMAGE,

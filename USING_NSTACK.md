@@ -378,7 +378,7 @@ nstack open --print
 Expected result:
 
 - `nstack deploy` prints the deployed URL.
-- `nstack verify` succeeds for `/` and `/api/status`.
+- `nstack verify` succeeds for `/api/ready`.
 - `nstack status --check` exits successfully.
 - Dokploy has a Compose app named `<slug>-app`.
 - Dokploy Domains route `/` to `frontend:3000` and `/api` to `backend:8080`.
@@ -450,8 +450,7 @@ export default {
   verify: {
     timeoutSeconds: 120,
     endpoints: [
-      { name: "frontend", path: "/", expectStatus: 200, rejectText: ["fetch failed", "Nuxt instance unavailable"] },
-      { name: "status", path: "/api/status", expectStatus: 200, expectCommit: true },
+      { name: "ready", path: "/api/ready", expectStatus: 200, expectCommit: true },
     ],
   },
 };
@@ -709,9 +708,11 @@ nstack status --json
 
 Verification uses the endpoints in `nstack.config.mjs`. A generated app verifies:
 
-- `/` returns the Nuxt app.
-- `/api/status` returns the backend status endpoint.
-- The status endpoint can be required to match the deployed commit.
+- `/api/ready` returns a lightweight backend readiness response.
+- The readiness endpoint can be required to match the deployed commit.
+
+Generated apps also include `/api/status` for richer DB-backed checks; keep that
+for app-specific verification when you want slower end-to-end probes.
 
 Run verification directly:
 
@@ -813,7 +814,7 @@ Consecutive deploys should be much faster when:
 - Only app source changes.
 - Dependency manifests and lockfiles are unchanged.
 
-The backend Dockerfile intentionally puts stable toolchain layers before source copies. Changing backend source should not rerun Corepack, the Encore tarball download, SHA verification, extraction, or backend dependency install. It should rerun Encore wrapper generation, bundling, metadata, runtime copy, and image export.
+The backend Dockerfile intentionally puts stable toolchain layers before source copies. Changing backend source should not rerun Corepack, the Encore tarball download, SHA verification, extraction, or backend dependency install. It should rerun the combined hot build step for Encore wrapper generation, bundling, metadata, runtime copy, and image export.
 
 Frontend source changes rerun the Nuxt build, but should not rerun frontend dependency installation unless `package.json` or the lockfile changes.
 
