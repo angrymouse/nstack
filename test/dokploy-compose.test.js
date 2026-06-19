@@ -118,6 +118,59 @@ test("upsertCompose can save a Gitea source-backed Compose app for push deploys"
   assert.equal(update.body.triggerType, "push");
 });
 
+test("upsertCompose ensures Gitea webhook when compose id is already saved", async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    const parsed = new URL(String(url));
+    const body = init.body ? JSON.parse(init.body) : null;
+    calls.push({ host: parsed.host, method: init.method || "GET", path: parsed.pathname, body });
+    if (parsed.host === "git.example.test" && (init.method || "GET") === "GET") return Response.json([]);
+    if (parsed.host === "git.example.test" && init.method === "POST") return Response.json({ id: 12 });
+    if (parsed.pathname === "/api/compose.one") {
+      return Response.json({
+        json: {
+          composeId: "compose-1",
+          refreshToken: "refresh-1",
+          gitea: {
+            giteaUrl: "https://git.example.test",
+            accessToken: "token-1",
+          },
+        },
+      });
+    }
+    return Response.json({ json: {} });
+  };
+
+  try {
+    const provider = new DokployProvider({
+      config: {
+        app: { slug: "compose-app" },
+        deploy: { provider: { url: "https://dokploy.example.test", apiKey: "dummy" } },
+      },
+      state: { dokploy: { composeId: "compose-1" } },
+    });
+    await provider.upsertCompose("environment-1", "services: {}", "API_SECRET=two\n", {
+      source: {
+        sourceType: "gitea",
+        giteaId: "gitea-1",
+        owner: "acme",
+        repository: "source-app",
+        branch: "main",
+        composePath: "deploy/nstack/compose.dokploy.yaml",
+        watchPaths: [],
+      },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.ok(calls.some((call) => call.host === "dokploy.example.test" && call.path === "/api/compose.one"));
+  const createdHook = calls.find((call) => call.host === "git.example.test" && call.method === "POST");
+  assert.equal(createdHook.path, "/api/v1/repos/acme/source-app/hooks");
+  assert.equal(createdHook.body.config.url, "https://dokploy.example.test/api/deploy/compose/refresh-1");
+});
+
 test("upsertCompose saves provider-specific source fields", async () => {
   const sources = [
     {

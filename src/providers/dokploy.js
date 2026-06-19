@@ -163,6 +163,7 @@ export class DokployProvider {
     if (stateId) {
       await this.updateComposeFile(environmentId, stateId, composeFile, source);
       await this.saveComposeEnvironment(stateId, env);
+      await this.ensureSourceWebhook(stateId, source);
       return stateId;
     }
     const existing = await this.findByName("compose.search", { environmentId, name, limit: 50 }, name, ["composeId", "id"]);
