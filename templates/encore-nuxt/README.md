@@ -11,7 +11,8 @@ pnpm dev
 
 ## Deploy
 
-Point the domain at your Dokploy server, then run:
+Point the domain at your Dokploy server. If this app was not linked during
+`nstack init`, run:
 
 ```sh
 nstack configure --domain <domain> --dokploy-url https://dokploy.example.com --dokploy-api-key <key> --repository https://github.com/acme/__APP_SLUG__.git

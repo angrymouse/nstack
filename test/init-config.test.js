@@ -144,6 +144,20 @@ test("cli flags do not mutate process env while writing local config", async () 
   assert.match(localEnv, /NSTACK_REGISTRY=ghcr\.io\/acme\/linked/);
 });
 
+test("init skips deploy wizard when stdin is not interactive", async () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "nstack-init-nontty-"));
+  const target = path.join(cwd, "app");
+
+  const report = await runCli(["init", target]);
+
+  assert.equal(report.files.localEnv, null);
+  assert.deepEqual(report.next, [
+    "pnpm install",
+    "nstack configure --domain <domain> --dokploy-url <url> --dokploy-api-key <key> --repository <git-url>",
+    "nstack deploy",
+  ]);
+});
+
 test("init can write deploy settings for a non-prod target", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "nstack-init-target-"));
   const target = path.join(cwd, "app");
@@ -166,6 +180,54 @@ test("init can write deploy settings for a non-prod target", async () => {
   assert.match(localEnv, /NSTACK_TARGET=staging/);
   assert.match(localEnv, /NSTACK_DOMAIN=staging\.example\.test/);
   assert.match(localEnv, /NSTACK_REGISTRY=ghcr\.io\/acme\/app-staging/);
+});
+
+test("init can write provider-specific source settings non-interactively", async () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "nstack-init-source-"));
+  const target = path.join(cwd, "app");
+
+  const report = await runCli([
+    "init",
+    target,
+    "--yes",
+    "--domain",
+    "source.example.test",
+    "--dokploy-url",
+    "https://dokploy.example.test",
+    "--dokploy-api-key",
+    "secret-token",
+    "--repository",
+    "https://gitlab.example.test/platform/apps/source-app.git",
+    "--branch",
+    "main",
+    "--source-type",
+    "gitlab",
+    "--gitlab-id",
+    "gitlab-1",
+    "--gitlab-project-id",
+    "42",
+    "--gitlab-path-namespace",
+    "platform/apps/source-app",
+    "--watch-paths",
+    "backend/**,frontend/**,deploy/nstack/**",
+  ]);
+  assert.deepEqual(report.next, ["pnpm install", "nstack deploy"]);
+  assert.equal(report.deploy.source.type, "gitlab");
+
+  const config = readFileSync(path.join(target, "nstack.config.mjs"), "utf8");
+  assert.doesNotMatch(config, /gitlab-1|secret-token|source\.example\.test|gitlab\.example\.test/);
+
+  const localEnv = readFileSync(path.join(target, ".nstack", "local.env"), "utf8");
+  assert.match(localEnv, /NSTACK_DOMAIN=source\.example\.test/);
+  assert.match(localEnv, /DOKPLOY_URL=https:\/\/dokploy\.example\.test/);
+  assert.match(localEnv, /DOKPLOY_API_KEY=secret-token/);
+  assert.match(localEnv, /NSTACK_REPOSITORY=https:\/\/gitlab\.example\.test\/platform\/apps\/source-app\.git/);
+  assert.match(localEnv, /NSTACK_BRANCH=main/);
+  assert.match(localEnv, /NSTACK_SOURCE_TYPE=gitlab/);
+  assert.match(localEnv, /NSTACK_GITLAB_ID=gitlab-1/);
+  assert.match(localEnv, /NSTACK_GITLAB_PROJECT_ID=42/);
+  assert.match(localEnv, /NSTACK_GITLAB_PATH_NAMESPACE=platform\/apps\/source-app/);
+  assert.match(localEnv, /NSTACK_WATCH_PATHS="backend\/\*\*,frontend\/\*\*,deploy\/nstack\/\*\*"/);
 });
 
 test("init --json reports scaffold metadata without secret values", async () => {

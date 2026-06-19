@@ -2,6 +2,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { configure, deploy, redeploy, rollback, verify, waitForDeployment } from "./deploy.js";
 import { cancelDeployment, inspectDeployment, listDeployments, logs } from "./deployments.js";
+import { Prompter } from "./prompt.js";
+import { DokployClient } from "./providers/dokploy.js";
 import {
   localEnvPath,
   localEnvPathForTarget,
@@ -17,7 +19,7 @@ import { pull } from "./pull.js";
 import { runSecretCommand } from "./secrets.js";
 import { showStatus } from "./status.js";
 import { listTargets } from "./targets.js";
-import { copyTree, ensureDir, fileExists, mergeEnvFile, readJSON, removeIfExists, slugify } from "./util.js";
+import { commandOutput, copyTree, ensureDir, fileExists, mergeEnvFile, readJSON, removeIfExists, slugify } from "./util.js";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const booleanOptions = new Set([
@@ -38,6 +40,7 @@ const booleanOptions = new Set([
   "check",
   "print",
   "noBrowser",
+  "noDeploy",
   "dashboard",
   "stage",
   "follow",
@@ -53,6 +56,17 @@ const valueOptions = new Set([
   "registry",
   "repository",
   "branch",
+  "sourceType",
+  "githubId",
+  "gitlabId",
+  "bitbucketId",
+  "giteaId",
+  "gitlabProjectId",
+  "gitlabPathNamespace",
+  "bitbucketRepositorySlug",
+  "sshKeyId",
+  "composePath",
+  "watchPaths",
   "dokployUrl",
   "dokployApiKey",
   "serverId",
@@ -119,7 +133,9 @@ async function init(target, options) {
     APP_NAME: appName,
     APP_SLUG: slug,
   });
-  const localEnv = localDeployValues(options);
+  const flagEnv = localDeployValues(options);
+  const wizardEnv = await initDeployWizard(cwd, options, flagEnv);
+  const localEnv = { ...flagEnv, ...wizardEnv };
   if (Object.keys(localEnv).length > 0) {
     mergeEnvFile(path.join(cwd, localEnvPathForTarget(localEnv.NSTACK_TARGET || "prod")), localEnv);
   }
@@ -136,9 +152,7 @@ async function init(target, options) {
   }
   console.log(`Initialized ${slug} in ${cwd}`);
   console.log("Next:");
-  console.log("  pnpm install");
-  console.log("  nstack configure --domain <domain> --dokploy-url <url> --dokploy-api-key <key> --repository <git-url>");
-  console.log("  nstack deploy");
+  for (const step of report.next) console.log(`  ${step}`);
   return report;
 }
 
@@ -183,6 +197,17 @@ function localDeployValues(options) {
     ...(options.registry ? { NSTACK_REGISTRY: options.registry } : {}),
     ...(options.repository ? { NSTACK_REPOSITORY: options.repository } : {}),
     ...(options.branch ? { NSTACK_BRANCH: options.branch } : {}),
+    ...(options.sourceType ? { NSTACK_SOURCE_TYPE: options.sourceType } : {}),
+    ...(options.githubId ? { NSTACK_GITHUB_ID: options.githubId } : {}),
+    ...(options.gitlabId ? { NSTACK_GITLAB_ID: options.gitlabId } : {}),
+    ...(options.bitbucketId ? { NSTACK_BITBUCKET_ID: options.bitbucketId } : {}),
+    ...(options.giteaId ? { NSTACK_GITEA_ID: options.giteaId } : {}),
+    ...(options.gitlabProjectId ? { NSTACK_GITLAB_PROJECT_ID: options.gitlabProjectId } : {}),
+    ...(options.gitlabPathNamespace ? { NSTACK_GITLAB_PATH_NAMESPACE: options.gitlabPathNamespace } : {}),
+    ...(options.bitbucketRepositorySlug ? { NSTACK_BITBUCKET_REPOSITORY_SLUG: options.bitbucketRepositorySlug } : {}),
+    ...(options.sshKeyId ? { NSTACK_GIT_SSH_KEY_ID: options.sshKeyId } : {}),
+    ...(options.composePath ? { NSTACK_COMPOSE_PATH: options.composePath } : {}),
+    ...(options.watchPaths ? { NSTACK_WATCH_PATHS: options.watchPaths } : {}),
     ...(options.dokployUrl ? { DOKPLOY_URL: options.dokployUrl } : {}),
     ...(options.dokployApiKey ? { DOKPLOY_API_KEY: options.dokployApiKey } : {}),
     ...(options.serverId ? { DOKPLOY_SERVER_ID: options.serverId } : {}),
@@ -191,6 +216,181 @@ function localDeployValues(options) {
     ...(options.project ? { DOKPLOY_PROJECT: options.project } : {}),
     ...(options.environment ? { DOKPLOY_ENVIRONMENT: options.environment } : {}),
   };
+}
+
+async function initDeployWizard(cwd, options, existingEnv) {
+  if (!shouldRunInitDeployWizard(options, existingEnv)) return {};
+  const prompter = new Prompter({ yes: options.yes });
+  try {
+    const enabled = await prompter.confirm("NSTACK_INIT_DEPLOY", "Set up Dokploy deployment now?", { defaultValue: true });
+    if (!enabled) return {};
+
+    const domain = await prompter.ask("NSTACK_DOMAIN", "App domain");
+    const dokployUrl = await prompter.ask("DOKPLOY_URL", "Dokploy URL");
+    const dokployApiKey = await prompter.ask("DOKPLOY_API_KEY", "Dokploy API key", { secret: true });
+    const providers = await loadDokployGitProviders({ dokployUrl, dokployApiKey });
+    const source = await promptGitSource({ cwd, prompter, providers });
+    return {
+      NSTACK_DOMAIN: domain,
+      DOKPLOY_URL: dokployUrl,
+      DOKPLOY_API_KEY: dokployApiKey,
+      ...source,
+    };
+  } finally {
+    prompter.close();
+  }
+}
+
+function shouldRunInitDeployWizard(options, existingEnv) {
+  if (options.noDeploy || options.yes || options.ci || options.json) return false;
+  if (process.stdin.isTTY !== true) return false;
+  return Object.keys(existingEnv).length === 0;
+}
+
+async function loadDokployGitProviders({ dokployUrl, dokployApiKey }) {
+  try {
+    const client = new DokployClient({ url: dokployUrl, apiKey: dokployApiKey });
+    return asList(await client.trpcGet("gitProvider.getAll"))
+      .filter((provider) => provider?.providerType);
+  } catch (error) {
+    console.log(`Could not read Dokploy git providers; using manual Git setup. ${error instanceof Error ? error.message : String(error)}`);
+    return [];
+  }
+}
+
+async function promptGitSource({ cwd, prompter, providers }) {
+  const providerChoices = providers.map(gitProviderChoice).filter(Boolean);
+  const manualChoice = { label: "Add Git configuration manually", value: "manual" };
+  const choice = await prompter.select("NSTACK_GIT_SOURCE", "Git hosting", [...providerChoices, manualChoice]);
+  if (choice.value === "manual") return promptManualGitSource({ cwd, prompter });
+  return promptProviderGitSource({ cwd, prompter, choice });
+}
+
+async function promptProviderGitSource({ cwd, prompter, choice }) {
+  const repository = await prompter.ask("NSTACK_REPOSITORY", "Repository URL", { defaultValue: inferGitRepository(cwd) });
+  const branch = await prompter.ask("NSTACK_BRANCH", "Branch", { defaultValue: inferGitBranch(cwd) || "main" });
+  return sourceEnvValues({
+    sourceType: choice.sourceType,
+    providerId: choice.providerId,
+    repository,
+    branch,
+  });
+}
+
+async function promptManualGitSource({ cwd, prompter }) {
+  const type = await prompter.select("NSTACK_SOURCE_TYPE", "Git hosting type", [
+    { label: "GitHub", value: "github" },
+    { label: "GitLab", value: "gitlab" },
+    { label: "Bitbucket", value: "bitbucket" },
+    { label: "Gitea / Forgejo", value: "gitea" },
+    { label: "Plain Git / custom host", value: "git" },
+  ]);
+  const repository = await prompter.ask("NSTACK_REPOSITORY", "Repository URL", { defaultValue: inferGitRepository(cwd) });
+  const branch = await prompter.ask("NSTACK_BRANCH", "Branch", { defaultValue: inferGitBranch(cwd) || "main" });
+  const providerId = type.value === "git"
+    ? ""
+    : await prompter.askOptional(providerIdEnvKey(type.value), "Dokploy provider id (optional)");
+  const sshKeyId = type.value === "git"
+    ? await prompter.askOptional("NSTACK_GIT_SSH_KEY_ID", "Dokploy SSH key id for private SSH repos (optional)")
+    : "";
+  return sourceEnvValues({
+    sourceType: type.value,
+    providerId,
+    repository,
+    branch,
+    sshKeyId,
+  });
+}
+
+function gitProviderChoice(provider) {
+  const sourceType = provider.providerType;
+  const providerId = providerSpecificId(provider, sourceType);
+  if (!sourceType || !providerId) return null;
+  const host = providerHost(provider, sourceType);
+  const name = provider.name || providerDisplayName(provider, sourceType);
+  return {
+    label: `${sourceTypeLabel(sourceType)}${name ? `: ${name}` : ""}${host ? ` (${host})` : ""}`,
+    value: `${sourceType}:${providerId}`,
+    sourceType,
+    providerId,
+  };
+}
+
+function sourceEnvValues({ sourceType, providerId = "", repository, branch, sshKeyId = "" }) {
+  return {
+    NSTACK_SOURCE_TYPE: sourceType,
+    NSTACK_REPOSITORY: repository,
+    NSTACK_BRANCH: branch,
+    ...(providerId ? { [providerIdEnvKey(sourceType)]: providerId } : {}),
+    ...(sshKeyId ? { NSTACK_GIT_SSH_KEY_ID: sshKeyId } : {}),
+  };
+}
+
+function providerIdEnvKey(sourceType) {
+  return {
+    github: "NSTACK_GITHUB_ID",
+    gitlab: "NSTACK_GITLAB_ID",
+    bitbucket: "NSTACK_BITBUCKET_ID",
+    gitea: "NSTACK_GITEA_ID",
+  }[sourceType] || "NSTACK_GIT_PROVIDER_ID";
+}
+
+function providerSpecificId(provider, sourceType) {
+  return provider?.[sourceType]?.[`${sourceType}Id`] || "";
+}
+
+function providerHost(provider, sourceType) {
+  const details = provider?.[sourceType] || {};
+  if (sourceType === "github") return "github.com";
+  if (sourceType === "bitbucket") return "bitbucket.org";
+  if (sourceType === "gitlab") return cleanHost(details.gitlabUrl || details.gitlabInternalUrl || "");
+  if (sourceType === "gitea") return cleanHost(details.giteaUrl || details.giteaInternalUrl || "");
+  return "";
+}
+
+function providerDisplayName(provider, sourceType) {
+  const details = provider?.[sourceType] || {};
+  return details.githubAppName || details.groupName || details.bitbucketWorkspaceName || details.bitbucketUsername || "";
+}
+
+function sourceTypeLabel(sourceType) {
+  return {
+    github: "GitHub",
+    gitlab: "GitLab",
+    bitbucket: "Bitbucket",
+    gitea: "Gitea / Forgejo",
+    git: "Plain Git",
+  }[sourceType] || sourceType;
+}
+
+function cleanHost(value = "") {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  try {
+    return new URL(text.includes("://") ? text : `https://${text}`).host;
+  } catch {
+    return text.replace(/^https?:\/\//, "").split("/")[0];
+  }
+}
+
+function inferGitRepository(cwd) {
+  try {
+    return commandOutput("git", ["config", "--get", "remote.origin.url"], { cwd }).trim();
+  } catch {
+    return "";
+  }
+}
+
+function inferGitBranch(cwd) {
+  try {
+    return commandOutput("git", ["branch", "--show-current"], { cwd }).trim();
+  } catch {
+    return "";
+  }
+}
+
+function asList(value) {
+  return Array.isArray(value) ? value : [];
 }
 
 function initReport({ cwd, appName, slug, template, localEnv }) {
@@ -209,6 +409,7 @@ function initReport({ cwd, appName, slug, template, localEnv }) {
       buildMode: localEnv.NSTACK_BUILD_MODE || (localEnv.NSTACK_REGISTRY ? "registry" : "compose"),
       registry: localEnv.NSTACK_REGISTRY || null,
       source: {
+        type: localEnv.NSTACK_SOURCE_TYPE || null,
         repository: localEnv.NSTACK_REPOSITORY || null,
         branch: localEnv.NSTACK_BRANCH || null,
       },
@@ -226,12 +427,17 @@ function initReport({ cwd, appName, slug, template, localEnv }) {
     localEnv: {
       keys: localEnvKeys,
     },
-    next: [
-      "pnpm install",
-      "nstack configure --domain <domain> --dokploy-url <url> --dokploy-api-key <key> --repository <git-url>",
-      "nstack deploy",
-    ],
+    next: initNextSteps(localEnv),
   };
+}
+
+function initNextSteps(localEnv) {
+  const linked = Boolean(localEnv.NSTACK_DOMAIN && localEnv.DOKPLOY_URL && localEnv.DOKPLOY_API_KEY && localEnv.NSTACK_REPOSITORY);
+  return [
+    "pnpm install",
+    ...(linked ? [] : ["nstack configure --domain <domain> --dokploy-url <url> --dokploy-api-key <key> --repository <git-url>"]),
+    "nstack deploy",
+  ];
 }
 
 function parseArgs(argv) {
@@ -369,6 +575,7 @@ Configure:
   --build-mode <mode>            compose or registry; compose is default without --registry
   --repository <git-url>         source repo used by Dokploy Compose builds
   --branch <name>                source branch fallback when no commit is available
+  --source-type <type>           github, gitlab, bitbucket, gitea, or git
   --dokploy-url <url>            Dokploy panel URL
   --dokploy-api-key <key>        Dokploy API key
   --registry <prefix>            opt into registry image pushes, e.g. ghcr.io/acme/my-app
@@ -376,6 +583,7 @@ Configure:
   --project <name>               Dokploy project name
   --environment <name>           Dokploy environment name
   --server-id <id>               optional Dokploy deploy server/runner id
+  --no-deploy                    skip the interactive init deploy wizard
 
 Deploy:
   --no-wait                      trigger deploy and return before verification/status

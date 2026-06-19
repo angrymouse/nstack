@@ -8,9 +8,12 @@ It keeps the app shape boring:
 nstack init my-app
 cd my-app
 pnpm install
-nstack configure --domain app.example.com --dokploy-url https://dokploy.example.com --dokploy-api-key <key> --repository https://github.com/acme/my-app.git
 nstack deploy
 ```
+
+Interactive `nstack init` can link Dokploy and asks you to pick an existing Git
+provider or add a manual Git source. In CI, use `nstack configure` with flags or
+env vars for the same settings.
 
 `nstack deploy` discovers Encore resources, renders Encore infra and Dokploy
 Compose, lets Dokploy build the production backend/frontend services from source,

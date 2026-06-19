@@ -207,6 +207,15 @@ cd my-app
 pnpm install
 ```
 
+Interactive `nstack init` asks whether to set up Dokploy deployment now. If you say yes, it asks for the app domain, Dokploy URL, and API key, then lists the Git providers already connected in Dokploy. Pick the matching provider, or choose manual Git configuration for a new/custom source.
+
+For automation or a scaffold-only run, use:
+
+```sh
+nstack init my-app --yes
+nstack init my-app --no-deploy
+```
+
 The generated app contains an Encore backend, a Nuxt frontend, production Dockerfiles for Dokploy Compose, and a minimal `nstack.config.mjs`.
 
 ### 8. Run Local Checks
@@ -238,9 +247,9 @@ git push -u origin main
 
 If the repository already exists locally, use the normal `git remote`, `git add`, `git commit`, and `git push` flow for your project.
 
-### 10. Link The Production Target
+### 10. Link Or Adjust The Production Target
 
-Configure the production deploy target:
+If you skipped the init deploy setup, or you want to change it, configure the production deploy target:
 
 ```sh
 nstack configure \
