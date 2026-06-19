@@ -39,7 +39,7 @@ const releaseManifestName = "release.json";
 const releaseManifestSchema = "nstack.release.v1";
 const maxReleaseHistory = 20;
 const defaultValidationPollMs = 100;
-const maxValidationPollMs = 500;
+const maxValidationPollMs = 250;
 const defaultEndpointRequestTimeoutMs = 2000;
 
 export async function configure(options = {}) {
@@ -593,35 +593,50 @@ async function runReleaseChecks(cwd, config, release, options = {}) {
   let deployment = null;
   let publicReport = null;
   let statusReport = null;
-  const waitForDeploymentTask = (signal) => timedAsync("dokploy: wait deployment", true, timings, () => waitForDokployDeployment(cwd, config, release, {
-      requireMatch: options.requireDeploymentMatch,
-      timeoutMs: options.statusTimeoutMs || options.timeoutMs,
-      intervalMs: options.statusIntervalMs || options.intervalMs,
-      signal,
-    }));
-  const verifyTask = (signal) => timedAsync("verify: public endpoints", true, timings, () =>
-    verify({ config, release, cwd, quiet: options.json, intervalMs: options.verifyIntervalMs || options.statusIntervalMs || options.intervalMs, signal }));
-
-  if (!options.skipStatus && !options.skipVerify) {
-    const results = await runConcurrentReleaseTasks({
-      deployment: waitForDeploymentTask,
-      publicReport: verifyTask,
-    });
-    deployment = results.deployment;
-    publicReport = results.publicReport;
-  } else {
-    if (!options.skipStatus) deployment = await waitForDeploymentTask();
-    if (!options.skipVerify) publicReport = await verifyTask();
-  }
-  if (!options.skipStatus) {
-    statusReport = await timedAsync("dokploy: status audit", true, timings, () => auditPostDeployStatus(cwd, {
+  let statusTask = null;
+  const startStatusAudit = () => {
+    if (statusTask) return statusTask;
+    statusTask = timedAsync("dokploy: status audit", true, timings, () => auditPostDeployStatus(cwd, {
       target: config.deploy.target,
       timeoutMs: options.statusTimeoutMs,
       intervalMs: options.statusIntervalMs,
       timeoutSeconds: config.verify.timeoutSeconds,
       quiet: options.json,
     }));
+    statusTask.catch(() => null);
+    return statusTask;
+  };
+  const waitForDeploymentTask = async (signal) => {
+    const result = await timedAsync("dokploy: wait deployment", true, timings, () => waitForDokployDeployment(cwd, config, release, {
+      requireMatch: options.requireDeploymentMatch,
+      timeoutMs: options.statusTimeoutMs || options.timeoutMs,
+      intervalMs: options.statusIntervalMs || options.intervalMs,
+      signal,
+    }));
+    startStatusAudit();
+    return result;
+  };
+  const verifyTask = (signal) => timedAsync("verify: public endpoints", true, timings, () =>
+    verify({ config, release, cwd, quiet: options.json, intervalMs: options.verifyIntervalMs || options.statusIntervalMs || options.intervalMs, signal }));
+
+  if (!options.skipStatus && !options.skipVerify) {
+    let results = null;
+    try {
+      results = await runConcurrentReleaseTasks({
+        deployment: waitForDeploymentTask,
+        publicReport: verifyTask,
+      });
+    } catch (error) {
+      if (statusTask) await statusTask.catch(() => null);
+      throw error;
+    }
+    deployment = results.deployment;
+    publicReport = results.publicReport;
+  } else {
+    if (!options.skipStatus) deployment = await waitForDeploymentTask();
+    if (!options.skipVerify) publicReport = await verifyTask();
   }
+  if (!options.skipStatus) statusReport = await startStatusAudit();
   return { deployment, publicReport, statusReport, timings };
 }
 
