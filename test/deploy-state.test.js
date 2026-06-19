@@ -1042,6 +1042,99 @@ test("deploy configures Gitea source-backed Compose apps for push deployments", 
   assert.equal(env.NSTACK_IMAGE_TAG, "source-feature-push-deploy");
 });
 
+test("deploy auto-commits generated source-backed artifacts before triggering Dokploy", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "nstack-source-sync-"));
+  const cwd = path.join(root, "app");
+  const remote = path.join(root, "remote.git");
+  mkdirSync(path.join(cwd, "backend", "api"), { recursive: true });
+  mkdirSync(path.join(cwd, "frontend"), { recursive: true });
+  mkdirSync(path.join(cwd, ".nstack"), { recursive: true });
+  writeFileSync(path.join(cwd, ".gitignore"), ".nstack\nnode_modules\n");
+  writeFileSync(path.join(cwd, "nstack.config.mjs"), `export default {
+  app: { name: "Source Sync", slug: "source-sync" },
+  deploy: {
+    buildMode: "compose",
+    source: {
+      repository: "git@git.example.test:acme/source-sync.git",
+      branch: "main",
+      giteaId: "gitea-1"
+    }
+  },
+  verify: { endpoints: [] },
+};\n`);
+  writeFileSync(path.join(cwd, "backend", "api", "status.ts"), `export const ok = true;\n`);
+  writeFileSync(path.join(cwd, "backend", "Dockerfile"), "FROM scratch\n");
+  writeFileSync(path.join(cwd, "frontend", "Dockerfile"), "FROM scratch\n");
+  execFileSync("git", ["init", "--bare", remote], { stdio: "ignore" });
+  execFileSync("git", ["init"], { cwd, stdio: "ignore" });
+  execFileSync("git", ["config", "user.email", "nstack@example.test"], { cwd });
+  execFileSync("git", ["config", "user.name", "nstack"], { cwd });
+  execFileSync("git", ["branch", "-M", "main"], { cwd });
+  execFileSync("git", ["remote", "add", "origin", remote], { cwd });
+  execFileSync("git", ["add", "."], { cwd });
+  execFileSync("git", ["commit", "-m", "initial"], { cwd, stdio: "ignore" });
+  execFileSync("git", ["push", "-u", "origin", "main"], { cwd, stdio: "ignore" });
+  const initialCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8" }).trim();
+
+  const envKeys = ["NSTACK_DOMAIN", "DOKPLOY_URL", "DOKPLOY_API_KEY"];
+  const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+  process.env.NSTACK_DOMAIN = "source-sync.example.test";
+  process.env.DOKPLOY_URL = "https://dokploy.example.test";
+  process.env.DOKPLOY_API_KEY = "dummy";
+
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    const parsed = new URL(String(url));
+    const endpoint = parsed.pathname.replace(/^\/api\/(?:trpc\/)?/, "");
+    const body = init.body ? JSON.parse(init.body) : null;
+    calls.push({ endpoint, method: init.method || "GET", body });
+    if ((init.method || "GET") === "GET") {
+      if (endpoint === "gitProvider.getAll") {
+        return Response.json({ json: [{ providerType: "gitea", gitea: { giteaId: "gitea-1", giteaUrl: "https://git.example.test", isConfigured: true } }] });
+      }
+      if (endpoint === "gitea.giteaProviders") return Response.json({ json: [{ giteaId: "gitea-1" }] });
+      if (endpoint === "project.all" || endpoint === "environment.byProjectId" || endpoint === "compose.search" || endpoint === "domain.byComposeId" || endpoint === "schedule.list") {
+        return Response.json({ json: [] });
+      }
+      if (endpoint === "settings.getIp") return Response.json({ json: "203.0.113.10" });
+    }
+    if (endpoint === "domain.validateDomain") return Response.json({ json: { isValid: true, resolvedIp: "203.0.113.10" } });
+    const ids = {
+      "project.create": { projectId: "project-1" },
+      "environment.create": { environmentId: "environment-1" },
+      "compose.create": { composeId: "compose-1" },
+      "domain.create": { domainId: "domain-1" },
+    };
+    return Response.json({ json: ids[endpoint] || {} });
+  };
+
+  try {
+    const report = await deploy({ cwd, noWait: true, skipVerify: true, skipStatus: true, yes: true });
+    const finalCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8" }).trim();
+    const remoteCommit = execFileSync("git", ["rev-parse", "refs/heads/main"], { cwd: remote, encoding: "utf8" }).trim();
+    assert.notEqual(finalCommit, initialCommit);
+    assert.equal(remoteCommit, finalCommit);
+    assert.equal(report.release.commit, finalCommit);
+    assert.match(execFileSync("git", ["show", "--name-only", "--format=", "HEAD"], { cwd, encoding: "utf8" }), /deploy\/nstack\/compose\.dokploy\.yaml/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const key of envKeys) {
+      if (originalEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = originalEnv[key];
+    }
+  }
+
+  const deployCall = calls.find((call) => call.endpoint === "compose.deploy");
+  const save = calls.find((call) => call.endpoint === "compose.saveEnvironment");
+  const env = Object.fromEntries(save.body.env.trim().split("\n").map((line) => {
+    const index = line.indexOf("=");
+    return [line.slice(0, index), line.slice(index + 1)];
+  }));
+  assert.equal(deployCall.body.description.startsWith("Deploy "), true);
+  assert.equal(env.NSTACK_GIT_COMMIT, deployCall.body.description.replace(/^Deploy /, ""));
+});
+
 test("deploy passes target platform to backend and frontend image builds", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "nstack-platform-build-"));
   const fakeBin = path.join(cwd, "bin");

@@ -66,7 +66,7 @@ export async function deploy(options = {}) {
   config = await completeDeployConfig(config, cwd, options);
   const state = loadState(cwd, config.deploy.target);
   const skipBuild = Boolean(options.skipBuild || options.prebuilt || config.deploy.buildMode === "compose");
-  const release = resolveRelease(config, cwd, { ...options, skipBuild });
+  let release = resolveRelease(config, cwd, { ...options, skipBuild });
   const resources = await inspectResources(cwd, config);
   const timings = [];
   const localOnly = options.renderOnly || options.dryRun || options.buildOnly;
@@ -234,6 +234,8 @@ export async function deploy(options = {}) {
   writeText(composeFile, renderDokployCompose(ctx));
 
   const composeSource = await provider.resolveComposeSource();
+  const sourceSync = await syncSourceDeployArtifacts(cwd, config, composeSource, timings);
+  if (sourceSync.release) release = sourceSync.release;
   const composeId = await provider.upsertCompose(
     environmentId,
     renderDokployCompose({ ...ctx, state: nextState }),
@@ -1468,6 +1470,63 @@ function sourceImageTag(source) {
     .replace(/^-+|-+$/g, "")
     .slice(0, 96) || "branch";
   return `source-${branch}`;
+}
+
+async function syncSourceDeployArtifacts(cwd, config, source = null, timings = []) {
+  if (!source || source.sourceType === "raw") return { release: null };
+  const origin = safeOutput("git", ["config", "--get", "remote.origin.url"], cwd).trim();
+  if (!origin) return { release: null };
+
+  const generatedChanges = sourceGeneratedChanges(cwd);
+  const otherChanges = sourceOtherChanges(cwd);
+  if (otherChanges.length > 0) {
+    throw new Error([
+      "Source-backed deploy found uncommitted app changes.",
+      "Commit or stash app changes first; nstack only auto-commits generated deploy/nstack artifacts.",
+      ...otherChanges.slice(0, 8).map((file) => `  - ${file}`),
+      ...(otherChanges.length > 8 ? [`  - ${otherChanges.length - 8} more`] : []),
+    ].join("\n"));
+  }
+
+  if (generatedChanges.length > 0) {
+    await timedAsync("source: commit deploy artifacts", true, timings, async () => {
+      run("git", ["add", generatedDir], { cwd, capture: true });
+      const staged = safeOutput("git", ["diff", "--cached", "--name-only", "--", generatedDir], cwd).trim();
+      if (staged) run("git", ["commit", "-m", "Update nstack deploy artifacts"], { cwd, capture: true });
+    });
+  }
+
+  await timedAsync("source: push", true, timings, async () => {
+    const upstream = safeOutput("git", ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], cwd).trim();
+    if (upstream) {
+      run("git", ["push"], { cwd, capture: true });
+      return;
+    }
+    const branch = safeOutput("git", ["branch", "--show-current"], cwd).trim() || config.deploy.source?.branch || "main";
+    run("git", ["push", "-u", "origin", `HEAD:${branch}`], { cwd, capture: true });
+  });
+
+  return { release: releaseInfo(config, cwd) };
+}
+
+function sourceGeneratedChanges(cwd) {
+  return gitPorcelainPaths(cwd).filter((file) => isGeneratedDeployPath(file));
+}
+
+function sourceOtherChanges(cwd) {
+  return gitPorcelainPaths(cwd).filter((file) => !isGeneratedDeployPath(file));
+}
+
+function gitPorcelainPaths(cwd) {
+  const text = safeOutput("git", ["status", "--porcelain", "--untracked-files=all"], cwd);
+  return text.split(/\r?\n/)
+    .map((line) => line.slice(3).trim())
+    .filter(Boolean)
+    .map((file) => file.includes(" -> ") ? file.split(" -> ").pop().trim() : file);
+}
+
+function isGeneratedDeployPath(file) {
+  return file === generatedDir || file.startsWith(`${generatedDir}/`);
 }
 
 function safeOutput(command, args, cwd) {
