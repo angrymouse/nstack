@@ -407,39 +407,44 @@ test("upsertCompose saves provider-specific source fields", async () => {
 
 test("resolveComposeSource matches repositories to Dokploy git providers", async () => {
   const originalFetch = globalThis.fetch;
+  const providers = [
+    {
+      providerType: "github",
+      github: {
+        githubId: "github-1",
+      },
+    },
+    {
+      providerType: "gitlab",
+      gitlab: {
+        gitlabId: "gitlab-1",
+        gitlabUrl: "https://gitlab.example.test",
+      },
+    },
+    {
+      providerType: "bitbucket",
+      bitbucket: {
+        bitbucketId: "bitbucket-1",
+      },
+    },
+    {
+      providerType: "gitea",
+      gitea: {
+        giteaId: "gitea-1",
+        giteaUrl: "https://git.example.test",
+        isConfigured: false,
+      },
+    },
+  ];
   globalThis.fetch = async (url) => {
     const parsed = new URL(String(url));
-    assert.equal(parsed.pathname, "/api/trpc/gitProvider.getAll");
-    return Response.json({
-      json: [
-        {
-          providerType: "github",
-          github: {
-            githubId: "github-1",
-          },
-        },
-        {
-          providerType: "gitlab",
-          gitlab: {
-            gitlabId: "gitlab-1",
-            gitlabUrl: "https://gitlab.example.test",
-          },
-        },
-        {
-          providerType: "bitbucket",
-          bitbucket: {
-            bitbucketId: "bitbucket-1",
-          },
-        },
-        {
-          providerType: "gitea",
-          gitea: {
-            giteaId: "gitea-1",
-            giteaUrl: "https://git.example.test",
-          },
-        },
-      ],
-    });
+    const endpoint = parsed.pathname.replace("/api/trpc/", "");
+    if (endpoint === "gitProvider.getAll") return Response.json({ json: providers });
+    if (endpoint === "github.githubProviders") return Response.json({ json: [{ githubId: "github-1" }] });
+    if (endpoint === "gitlab.gitlabProviders") return Response.json({ json: [{ gitlabId: "gitlab-1" }] });
+    if (endpoint === "bitbucket.bitbucketProviders") return Response.json({ json: [{ bitbucketId: "bitbucket-1" }] });
+    if (endpoint === "gitea.giteaProviders") return Response.json({ json: [{ giteaId: "gitea-1" }] });
+    assert.fail(`Unexpected Dokploy endpoint ${endpoint}`);
   };
 
   try {
@@ -556,6 +561,55 @@ test("resolveComposeSource matches repositories to Dokploy git providers", async
       watchPaths: [],
       refLabel: "acme/bitbucket-app@main",
     });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("resolveComposeSource rejects unconfigured Dokploy git providers", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const parsed = new URL(String(url));
+    const endpoint = parsed.pathname.replace("/api/trpc/", "");
+    if (endpoint === "gitProvider.getAll") {
+      return Response.json({
+        json: [
+          {
+            providerType: "gitea",
+            gitea: {
+              giteaId: "gitea-1",
+              giteaUrl: "https://git.example.test",
+              isConfigured: false,
+            },
+          },
+        ],
+      });
+    }
+    if (endpoint === "gitea.giteaProviders") return Response.json({ json: [] });
+    assert.fail(`Unexpected Dokploy endpoint ${endpoint}`);
+  };
+
+  try {
+    const provider = new DokployProvider({
+      config: {
+        app: { slug: "compose-app" },
+        deploy: {
+          source: {
+            sourceType: "gitea",
+            giteaId: "gitea-1",
+            repository: "git@git.example.test:acme/source-app.git",
+            branch: "main",
+          },
+          provider: { url: "https://dokploy.example.test", apiKey: "dummy" },
+        },
+      },
+      state: { dokploy: {} },
+    });
+
+    await assert.rejects(
+      () => provider.resolveComposeSource(),
+      /Dokploy gitea provider id gitea-1 is not configured for source-backed Compose/,
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }

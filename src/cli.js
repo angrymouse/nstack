@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { configure, deploy, redeploy, rollback, verify, waitForDeployment } from "./deploy.js";
 import { cancelDeployment, inspectDeployment, listDeployments, logs } from "./deployments.js";
 import { Prompter } from "./prompt.js";
-import { DokployClient } from "./providers/dokploy.js";
+import { DokployClient, loadDokploySourceProviders } from "./providers/dokploy.js";
 import {
   localEnvPath,
   localEnvPathForTarget,
@@ -250,8 +250,7 @@ function shouldRunInitDeployWizard(options, existingEnv) {
 async function loadDokployGitProviders({ dokployUrl, dokployApiKey }) {
   try {
     const client = new DokployClient({ url: dokployUrl, apiKey: dokployApiKey });
-    return asList(await client.trpcGet("gitProvider.getAll"))
-      .filter((provider) => provider?.providerType);
+    return loadDokploySourceProviders(client);
   } catch (error) {
     console.log(`Could not read Dokploy git providers; using manual Git setup. ${error instanceof Error ? error.message : String(error)}`);
     return [];
@@ -387,10 +386,6 @@ function inferGitBranch(cwd) {
   } catch {
     return "";
   }
-}
-
-function asList(value) {
-  return Array.isArray(value) ? value : [];
 }
 
 function initReport({ cwd, appName, slug, template, localEnv }) {

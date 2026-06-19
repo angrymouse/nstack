@@ -233,8 +233,8 @@ export class DokployProvider {
 
   async resolveComposeSource() {
     const sourceConfig = this.config.deploy.source || {};
-    const providers = asList(await this.client.trpcGet("gitProvider.getAll"));
-    return resolveComposeSourceConfig(sourceConfig, providers);
+    const providers = await loadDokploySourceProviders(this.client);
+    return resolveComposeSourceConfig(sourceConfig, providers, { requireConfiguredProvider: true });
   }
 
   async saveComposeEnvironment(composeId, env = "") {
@@ -680,7 +680,7 @@ function giteaHookUrl(hook) {
   return hook?.config?.url || hook?.url || "";
 }
 
-export function resolveComposeSourceConfig(sourceConfig = {}, providers = []) {
+export function resolveComposeSourceConfig(sourceConfig = {}, providers = [], options = {}) {
   const repository = sourceConfig.repository || "";
   const branch = sourceConfig.branch || "";
   const parsed = parseGitRepository(repository);
@@ -690,9 +690,18 @@ export function resolveComposeSourceConfig(sourceConfig = {}, providers = []) {
   if (!sourceType || sourceType === "raw") return null;
   if (sourceType === "git") return plainGitSource(sourceConfig, parsed, branch);
 
+  const explicitProviderId = configuredProviderId(sourceConfig, sourceType);
   const match = providers.find((provider) => providerMatchesSource(provider, sourceType, parsed, sourceConfig));
-  const providerId = configuredProviderId(sourceConfig, sourceType) || providerSpecificId(match, sourceType);
-  if (!providerId) return null;
+  if (!match && options.requireConfiguredProvider && (sourceConfig.sourceType || explicitProviderId)) {
+    throw unavailableSourceProviderError(sourceType, sourceConfig);
+  }
+  const providerId = match ? explicitProviderId || providerSpecificId(match, sourceType) : explicitProviderId;
+  if (!providerId) {
+    if (sourceConfig.sourceType || configuredProviderId(sourceConfig, sourceType)) {
+      throw unavailableSourceProviderError(sourceType, sourceConfig);
+    }
+    return null;
+  }
 
   return {
     sourceType,
@@ -733,11 +742,77 @@ function providerMatchesAnySource(provider, parsed, sourceConfig) {
 
 function providerMatchesSource(provider, type, parsed, sourceConfig) {
   if (provider?.providerType !== type) return false;
+  if (!providerSourceConfigured(provider, type)) return false;
   const configured = configuredProviderId(sourceConfig, type);
   if (configured && providerSpecificId(provider, type) !== configured) return false;
   if (type === "github") return parsed.host === "github.com";
   if (type === "bitbucket") return parsed.host === "bitbucket.org";
   return providerHosts(provider, type).includes(parsed.host);
+}
+
+export async function loadDokploySourceProviders(client) {
+  const providers = asList(await client.trpcGet("gitProvider.getAll"))
+    .filter((provider) => provider?.providerType);
+  const configuredIdsByType = await loadConfiguredProviderIds(client, providers);
+  return providers.map((provider) => annotateSourceProvider(provider, configuredIdsByType));
+}
+
+async function loadConfiguredProviderIds(client, providers) {
+  const types = [...new Set(providers.map((provider) => provider.providerType).filter(Boolean))];
+  const entries = await Promise.all(types.map(async (type) => {
+    const endpoint = configuredProviderEndpoint(type);
+    if (!endpoint) return [type, null];
+    try {
+      const values = asList(await client.trpcGet(endpoint));
+      return [type, new Set(values.map((value) => configuredProviderListId(value, type)).filter(Boolean))];
+    } catch (error) {
+      if (!isUnknownEndpoint(error)) throw error;
+      return [type, null];
+    }
+  }));
+  return Object.fromEntries(entries);
+}
+
+function annotateSourceProvider(provider, configuredIdsByType) {
+  const type = provider.providerType;
+  const configuredIds = configuredIdsByType[type];
+  if (!(configuredIds instanceof Set)) return provider;
+  return {
+    ...provider,
+    __nstackSourceConfigured: configuredIds.has(providerSpecificId(provider, type)),
+  };
+}
+
+function configuredProviderEndpoint(type) {
+  return {
+    github: "github.githubProviders",
+    gitlab: "gitlab.gitlabProviders",
+    bitbucket: "bitbucket.bitbucketProviders",
+    gitea: "gitea.giteaProviders",
+  }[type] || "";
+}
+
+function configuredProviderListId(value, type) {
+  return value?.[`${type}Id`]
+    || value?.[type]?.[`${type}Id`]
+    || value?.gitProvider?.[type]?.[`${type}Id`]
+    || "";
+}
+
+function providerSourceConfigured(provider, type) {
+  if (Object.hasOwn(provider, "__nstackSourceConfigured")) return provider.__nstackSourceConfigured !== false;
+  const details = provider?.[type] || {};
+  if (Object.hasOwn(details, "isConfigured")) return details.isConfigured !== false;
+  return true;
+}
+
+function unavailableSourceProviderError(sourceType, sourceConfig) {
+  const providerId = configuredProviderId(sourceConfig, sourceType);
+  const suffix = providerId ? ` id ${providerId}` : "";
+  return new Error(
+    `Dokploy ${sourceType} provider${suffix} is not configured for source-backed Compose. ` +
+    "Configure the provider in Dokploy Settings > Git Providers, then rerun `nstack configure` or `nstack deploy`.",
+  );
 }
 
 function providerHosts(provider, type) {

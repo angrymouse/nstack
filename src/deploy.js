@@ -19,6 +19,7 @@ import {
   DokployClient,
   DokployProvider,
   existingInfraSecretError,
+  loadDokploySourceProviders,
   resolveComposeSourceConfig,
   sourceRefLabelForConfig,
 } from "./providers/dokploy.js";
@@ -888,8 +889,8 @@ async function completeSourceConfig({ buildMode, localOnly, source, repository, 
   if (buildMode !== "compose" || localOnly || !repository || !branch || !url || !apiKey) return source;
 
   const client = new DokployClient({ url, apiKey });
-  const providers = asList(await client.trpcGet("gitProvider.getAll"));
-  const resolved = resolveComposeSourceConfig(base, providers);
+  const providers = await loadDokploySourceProviders(client);
+  const resolved = resolveComposeSourceConfig(base, providers, { requireConfiguredProvider: true });
   return sourceDefaultsFromResolved(source, resolved);
 }
 
@@ -916,13 +917,6 @@ function sourceDefaultsFromResolved(source, resolved) {
     composePath: source.composePath || resolved.composePath || "",
     watchPaths: source.watchPaths.length ? source.watchPaths : resolved.watchPaths || [],
   };
-}
-
-function asList(value) {
-  if (Array.isArray(value)) return value;
-  if (Array.isArray(value?.data)) return value.data;
-  if (Array.isArray(value?.items)) return value.items;
-  return [];
 }
 
 function optionNumber(optionValue, existingValue) {

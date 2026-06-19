@@ -220,18 +220,22 @@ test("configure infers provider-backed source settings from Dokploy", async () =
   globalThis.fetch = async (url) => {
     const parsed = new URL(String(url));
     calls.push(parsed.pathname);
-    assert.equal(parsed.pathname, "/api/trpc/gitProvider.getAll");
-    return Response.json({
-      json: [
-        {
-          providerType: "gitea",
-          gitea: {
-            giteaId: "gitea-1",
-            giteaUrl: "https://git.example.test",
+    if (parsed.pathname === "/api/trpc/gitProvider.getAll") {
+      return Response.json({
+        json: [
+          {
+            providerType: "gitea",
+            gitea: {
+              giteaId: "gitea-1",
+              giteaUrl: "https://git.example.test",
+              isConfigured: false,
+            },
           },
-        },
-      ],
-    });
+        ],
+      });
+    }
+    if (parsed.pathname === "/api/trpc/gitea.giteaProviders") return Response.json({ json: [{ giteaId: "gitea-1" }] });
+    assert.fail(`Unexpected Dokploy endpoint ${parsed.pathname}`);
   };
 
   process.chdir(target);
@@ -256,7 +260,7 @@ test("configure infers provider-backed source settings from Dokploy", async () =
   }
 
   const localEnv = readFileSync(path.join(target, ".nstack", "local.env"), "utf8");
-  assert.deepEqual(calls, ["/api/trpc/gitProvider.getAll"]);
+  assert.deepEqual(calls, ["/api/trpc/gitProvider.getAll", "/api/trpc/gitea.giteaProviders"]);
   assert.match(localEnv, /NSTACK_REPOSITORY=git@git\.example\.test:acme\/demo\.git/);
   assert.match(localEnv, /NSTACK_BRANCH=main/);
   assert.match(localEnv, /NSTACK_SOURCE_TYPE=gitea/);

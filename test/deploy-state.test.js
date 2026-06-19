@@ -970,7 +970,21 @@ test("deploy configures Gitea source-backed Compose apps for push deployments", 
     const body = init.body ? JSON.parse(init.body) : null;
     calls.push({ endpoint, method: init.method || "GET", body });
     if ((init.method || "GET") === "GET") {
-      if (endpoint === "gitProvider.getAll") return Response.json({ json: [] });
+      if (endpoint === "gitProvider.getAll") {
+        return Response.json({
+          json: [
+            {
+              providerType: "gitea",
+              gitea: {
+                giteaId: "gitea-explicit",
+                giteaUrl: "https://git.example.test",
+                isConfigured: false,
+              },
+            },
+          ],
+        });
+      }
+      if (endpoint === "gitea.giteaProviders") return Response.json({ json: [{ giteaId: "gitea-explicit" }] });
       if (endpoint === "project.all" || endpoint === "environment.byProjectId" || endpoint === "compose.search" || endpoint === "domain.byComposeId" || endpoint === "schedule.list") {
         return Response.json({ json: [] });
       }
