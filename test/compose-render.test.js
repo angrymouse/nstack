@@ -33,7 +33,9 @@ test("compose renderer quotes dynamic values and omits cron runner containers", 
   assert.match(output, /command: "\/nsqd --lookupd-tcp-address=quoted-app-nsqlookupd:4160 --broadcast-address=quoted-app-nsqd --data-path=\/data"/);
   assert.match(output, /aliases:\n          - "quoted-app-nsqd"/);
   assert.doesNotMatch(output, /cron-runner/);
-  assert.doesNotMatch(output, /healthcheck:/);
+  assert.match(output, /frontend:[\s\S]*healthcheck:[\s\S]*node:net/);
+  assert.match(output, /backend:[\s\S]*healthcheck:[\s\S]*__encore\/healthz/);
+  assert.match(output, /healthcheck:[\s\S]*interval: "30s"[\s\S]*timeout: "1s"[\s\S]*start_interval: "1s"/);
 });
 
 test("compose renderer keeps source build values in Dokploy env placeholders", () => {

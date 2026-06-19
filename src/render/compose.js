@@ -45,6 +45,7 @@ export function renderDokployCompose(ctx) {
           NSTACK_IMAGE_TAG: "${NSTACK_IMAGE_TAG:-local}",
         },
         expose: ["3000"],
+        healthcheck: nodeTcpHealthcheck(3000),
         depends_on: {
           backend: { condition: "service_started" },
         },
@@ -59,6 +60,7 @@ export function renderDokployCompose(ctx) {
             aliases: [backendHost],
           },
         },
+        healthcheck: nodeHttpHealthcheck("http://127.0.0.1:8080/__encore/healthz"),
         depends_on: backendDependsOn(resources, migrationServices),
       },
     },
@@ -202,6 +204,34 @@ function backendEnv(ctx) {
     env[secret] = `\${${secret}:?set ${secret}}`;
   }
   return env;
+}
+
+function nodeHttpHealthcheck(url) {
+  return {
+    test: [
+      "CMD-SHELL",
+      `node -e "const timeout=AbortSignal.timeout(1000); fetch('${url}', { signal: timeout }).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"`,
+    ],
+    interval: "30s",
+    timeout: "1s",
+    retries: 3,
+    start_period: "30s",
+    start_interval: "1s",
+  };
+}
+
+function nodeTcpHealthcheck(port) {
+  return {
+    test: [
+      "CMD-SHELL",
+      `node -e "const net=require('node:net'); const socket=net.connect(${Number(port)}, '127.0.0.1'); const done=(code)=>{socket.destroy();process.exit(code)}; socket.once('connect',()=>done(0)); socket.once('error',()=>done(1)); setTimeout(()=>done(1),1000)"`,
+    ],
+    interval: "30s",
+    timeout: "1s",
+    retries: 3,
+    start_period: "30s",
+    start_interval: "1s",
+  };
 }
 
 function backendDependsOn(resources, migrationServices = {}) {
