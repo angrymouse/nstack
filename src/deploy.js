@@ -619,7 +619,15 @@ async function runReleaseChecks(cwd, config, release, options = {}) {
     return result;
   };
   const verifyTask = (signal) => timedAsync("verify: public endpoints", true, timings, () =>
-    verify({ config, release, cwd, quiet: options.json, intervalMs: options.verifyIntervalMs || options.statusIntervalMs || options.intervalMs, signal }));
+    verify({
+      config,
+      release,
+      cwd,
+      quiet: options.json,
+      intervalMs: options.verifyIntervalMs || options.statusIntervalMs || options.intervalMs,
+      expectedCommit: expectedEndpointCommitForReleaseChecks(config, release, options),
+      signal,
+    }));
 
   if (!options.skipStatus && !options.skipVerify) {
     let results = null;
@@ -1151,11 +1159,11 @@ function normalizeGitRepositoryUrl(value) {
   return `https://${ssh[1]}/${ssh[2]}`;
 }
 
-export async function verify({ config = null, release = null, cwd = process.cwd(), target = "", quiet = false, json = false, intervalMs = defaultValidationPollMs, signal = null } = {}) {
+export async function verify({ config = null, release = null, cwd = process.cwd(), target = "", quiet = false, json = false, intervalMs = defaultValidationPollMs, expectedCommit = undefined, signal = null } = {}) {
   const loadedConfig = config || await loadConfig(cwd, { target });
   const state = loadState(cwd, loadedConfig.deploy.target);
   const loadedRelease = release || state.lastAttempt || state.lastRelease || releaseInfo(loadedConfig, cwd);
-  const expectedCommit = expectedVerifyCommit(loadedConfig, loadedRelease);
+  const commitToExpect = expectedCommit ?? expectedVerifyCommit(loadedConfig, loadedRelease);
   const base = `https://${loadedConfig.app.domain}`;
   const deadline = Date.now() + Math.max(0, loadedConfig.verify.timeoutSeconds * 1000);
   let report = null;
@@ -1163,7 +1171,7 @@ export async function verify({ config = null, release = null, cwd = process.cwd(
   for (;;) {
     throwIfAborted(signal);
     report = await verifyReport(loadedConfig, loadedRelease, base, {
-      expectedCommit,
+      expectedCommit: commitToExpect,
       requestTimeoutMs: loadedConfig.verify.requestTimeoutMs,
       signal,
     });
@@ -1268,6 +1276,11 @@ function expectedVerifyCommit(config, release) {
     return sourceRefLabelForConfig(config.deploy.source) || release.commit;
   }
   return release.commit;
+}
+
+function expectedEndpointCommitForReleaseChecks(config, release, options = {}) {
+  if (!options.skipStatus && isSourceBackedCompose(config)) return "";
+  return expectedVerifyCommit(config, release);
 }
 
 function isSourceBackedCompose(config) {

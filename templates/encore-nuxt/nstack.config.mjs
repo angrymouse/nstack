@@ -9,7 +9,7 @@ export default {
   verify: {
     timeoutSeconds: 120,
     endpoints: [
-      { name: "ready", path: "/api/ready", expectStatus: 200, expectCommit: true },
+      { name: "ready", path: "/api/ready", expectStatus: 200 },
     ],
   },
 };

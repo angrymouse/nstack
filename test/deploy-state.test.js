@@ -1634,7 +1634,7 @@ test("wait for source-backed apps gates validation on the pushed Dokploy deploym
     if (parsed.hostname === "wait-source.example.test") {
       publicCalls += 1;
       assert.equal(parsed.pathname, "/api/status");
-      return new Response(matchingDeploymentDone ? `running ${currentCommit}` : "running oldcommit", { status: 200 });
+      return new Response(matchingDeploymentDone ? "ok" : "not yet", { status: 200 });
     }
     const endpoint = parsed.pathname.replace(/^\/api\/(?:trpc\/)?/, "");
     if (endpoint === "deployment.allByCompose") {
@@ -1687,10 +1687,11 @@ test("wait for source-backed apps gates validation on the pushed Dokploy deploym
     }
   }
 
-  assert.ok(publicCalls >= 2);
+  assert.ok(publicCalls >= 1);
   assert.ok(deploymentPolls >= 3);
   const report = JSON.parse(output.join("\n"));
   assert.equal(report.release.commit, currentCommit);
+  assert.equal(report.timings.steps.some((step) => step.name === "dokploy: wait deployment"), true);
 });
 
 test("wait refuses to promote when public verification is skipped", async () => {
