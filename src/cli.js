@@ -1,5 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { cleanup } from "./cleanup.js";
 import { configure, deploy, redeploy, rollback, verify, waitForDeployment } from "./deploy.js";
 import { cancelDeployment, inspectDeployment, listDeployments, logs } from "./deployments.js";
 import { Prompter } from "./prompt.js";
@@ -102,6 +103,7 @@ export async function runCli(argv) {
   if (command === "deployments" || command === "deployment" || command === "releases" || command === "list") return listDeployments(options);
   if (command === "logs" || command === "log") return logs(args, options);
   if (command === "cancel" || command === "cancel-deployment") return cancelDeployment(args, options);
+  if (command === "cleanup" || command === "clean") return cleanup(options);
   if (command === "open") return openTarget(args, options);
   if (command === "env" || command === "secret" || command === "secrets") return runSecretCommand(args, options);
   if (command === "build") return deploy({ ...options, buildOnly: true, skipVerify: true, skipStatus: true });
@@ -557,6 +559,7 @@ When needed:
   nstack doctor                  explain missing local setup
   nstack pull                    recover local state from Dokploy
   nstack rollback [tag|commit]   deploy a previous verified release
+  nstack cleanup                 enable Dokploy cleanup and prune unused images
   nstack open [dashboard]        open the app or Dokploy dashboard
 
 Options:
