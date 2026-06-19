@@ -53,6 +53,9 @@ test("init keeps deploy target values out of source config", async () => {
   const rootDockerignore = readFileSync(path.join(target, ".dockerignore"), "utf8");
   assert.match(rootDockerignore, /^\*\*\/node_modules$/m);
   assert.match(rootDockerignore, /^deploy\/nstack$/m);
+  assert.match(rootDockerignore, /\.git\/\*\*/);
+  assert.match(rootDockerignore, /!\.git\/HEAD/);
+  assert.match(rootDockerignore, /!\.git\/packed-refs/);
 
   const manifest = JSON.parse(readFileSync(path.join(target, "package.json"), "utf8"));
   assert.deepEqual(Object.keys(manifest.scripts).sort(), ["build", "check", "deploy", "dev", "status"]);
@@ -108,8 +111,10 @@ test("init keeps deploy target values out of source config", async () => {
   assert.match(backendDockerfile, /find \.encore\/nstack -name '\*\.map' -delete/);
   assert.match(backendDockerfile, /ENV RUST_LOG=info/);
   assert.match(backendDockerfile, /COPY --from=build \/workspace\/backend\/\.encore\/nstack\/cron-runner/);
+  assert.match(backendDockerfile, /\/encore\/nstack\/git-commit/);
+  assert.match(backendDockerfile, /nstack-backend-entrypoint/);
   assert.doesNotMatch(backendDockerfile, /--enable-source-maps/);
-  assert.match(backendDockerfile, /ENTRYPOINT \["node", "\/workspace\/backend\/\.encore\/build\/combined\/combined\/main\.mjs"\]/);
+  assert.match(backendDockerfile, /ENTRYPOINT \["\/usr\/local\/bin\/nstack-backend-entrypoint"\]/);
 
   const backendStatus = readFileSync(path.join(target, "backend", "api", "status.ts"), "utf8");
   assert.match(backendStatus, /path: "\/ready"/);
