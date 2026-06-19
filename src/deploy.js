@@ -1215,7 +1215,9 @@ async function verifyEndpoint(base, endpoint, release, options = {}) {
   const name = endpoint.name || endpoint.path;
   const expectStatus = endpoint.expectStatus || 200;
   const url = `${base}${endpoint.path}`;
-  const expectedCommit = endpoint.expectCommit ? options.expectedCommit || release.commit || "" : "";
+  const expectedCommit = endpoint.expectCommit
+    ? (options.expectedCommit !== undefined ? options.expectedCommit : release.commit || "")
+    : "";
   const requestTimeoutMs = Number(endpoint.requestTimeoutMs ?? options.requestTimeoutMs ?? defaultEndpointRequestTimeoutMs);
   const result = {
     name,

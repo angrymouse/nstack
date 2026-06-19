@@ -1672,7 +1672,7 @@ test("wait for source-backed apps gates validation on the pushed Dokploy deploym
 
   try {
     console.log = (line = "") => output.push(String(line));
-    const report = await waitForDeployment({ cwd, json: true, statusIntervalMs: 1 });
+    const report = await waitForDeployment({ cwd, json: true, statusIntervalMs: 1, statusTimeoutMs: 200 });
     assert.equal(report.release.commit, currentCommit);
     assert.equal(report.state.lastRelease.commit, currentCommit);
     assert.equal(report.state.lastAttempt.status, "verified");
