@@ -40,6 +40,7 @@ const releaseManifestSchema = "nstack.release.v1";
 const maxReleaseHistory = 20;
 const defaultValidationPollMs = 250;
 const maxValidationPollMs = 1000;
+const defaultEndpointRequestTimeoutMs = 2000;
 
 export async function configure(options = {}) {
   const cwd = options.cwd || process.cwd();
@@ -1091,7 +1092,10 @@ export async function verify({ config = null, release = null, cwd = process.cwd(
   let report = null;
   let poll = 0;
   for (;;) {
-    report = await verifyReport(loadedConfig, loadedRelease, base, { expectedCommit });
+    report = await verifyReport(loadedConfig, loadedRelease, base, {
+      expectedCommit,
+      requestTimeoutMs: loadedConfig.verify.requestTimeoutMs,
+    });
     if (report.ok) {
       if (json && !quiet) console.log(JSON.stringify(report, null, 2));
       else if (!quiet) console.log(`Verified ${base}`);
@@ -1133,6 +1137,7 @@ async function verifyEndpoint(base, endpoint, release, options = {}) {
   const expectStatus = endpoint.expectStatus || 200;
   const url = `${base}${endpoint.path}`;
   const expectedCommit = endpoint.expectCommit ? options.expectedCommit || release.commit || "" : "";
+  const requestTimeoutMs = Number(endpoint.requestTimeoutMs ?? options.requestTimeoutMs ?? defaultEndpointRequestTimeoutMs);
   const result = {
     name,
     path: endpoint.path,
@@ -1143,10 +1148,11 @@ async function verifyEndpoint(base, endpoint, release, options = {}) {
     durationMs: 0,
     expectCommit: Boolean(endpoint.expectCommit),
     expectedCommit: expectedCommit || null,
+    requestTimeoutMs: requestTimeoutMs > 0 ? requestTimeoutMs : null,
     error: null,
   };
   try {
-    const response = await fetch(url);
+    const response = await fetch(url, fetchOptionsForTimeout(requestTimeoutMs));
     result.status = response.status;
     if (response.status !== expectStatus) {
       result.error = `${name} returned HTTP ${response.status}`;
@@ -1169,6 +1175,12 @@ async function verifyEndpoint(base, endpoint, release, options = {}) {
     result.error = error instanceof Error ? error.message : String(error);
     return finishVerifyEndpoint(result, startedAt);
   }
+}
+
+function fetchOptionsForTimeout(requestTimeoutMs) {
+  if (!(requestTimeoutMs > 0)) return {};
+  if (typeof AbortSignal === "undefined" || typeof AbortSignal.timeout !== "function") return {};
+  return { signal: AbortSignal.timeout(requestTimeoutMs) };
 }
 
 function expectedVerifyCommit(config, release) {

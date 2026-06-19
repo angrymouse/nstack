@@ -62,6 +62,7 @@ export function normalizeConfig(config, options = {}) {
     },
     verify: {
       timeoutSeconds: Number(config.verify?.timeoutSeconds ?? 120),
+      requestTimeoutMs: Number(config.verify?.requestTimeoutMs ?? 2000),
       endpoints: config.verify?.endpoints || [
         { name: "frontend", path: "/", expectStatus: 200, rejectText: ["fetch failed", "Registry read failed", "Nuxt instance unavailable"] },
         { name: "api status", path: "/api/status", expectStatus: 200 },
