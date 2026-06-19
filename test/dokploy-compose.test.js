@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { DokployProvider, ensureGiteaComposeWebhook, expectedComposeDomains } from "../src/providers/dokploy.js";
+import {
+  DOKPLOY_REDIS_ARGS,
+  DOKPLOY_REDIS_COMMAND,
+  DOKPLOY_REDIS_IMAGE,
+  DokployProvider,
+  ensureGiteaComposeWebhook,
+  expectedComposeDomains,
+} from "../src/providers/dokploy.js";
 
 test("upsertCompose saves Compose env with Dokploy environment endpoint", async () => {
   const calls = [];
@@ -38,6 +45,64 @@ test("upsertCompose saves Compose env with Dokploy environment endpoint", async 
 
   const save = calls.find((call) => call.path === "/api/compose.saveEnvironment");
   assert.deepEqual(save.body, { composeId: "compose-1", env: "API_SECRET=one\n" });
+});
+
+test("ensureRedis creates a Dokploy-native Dragonfly cache resource", async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    const parsed = new URL(String(url));
+    const body = init.body ? JSON.parse(init.body) : null;
+    calls.push({ method: init.method || "GET", path: parsed.pathname, body });
+
+    if ((init.method || "GET") === "GET" && parsed.pathname === "/api/trpc/redis.search") {
+      return Response.json({ json: [] });
+    }
+    if (init.method === "POST" && parsed.pathname === "/api/redis.create") {
+      return Response.json({ json: { redisId: "redis-1" } });
+    }
+    if ((init.method || "GET") === "GET" && parsed.pathname === "/api/redis.one") {
+      return Response.json({ json: { redisId: "redis-1", appName: "cache-app-redis-a1b2c3" } });
+    }
+    return Response.json({ json: {} });
+  };
+
+  try {
+    const provider = new DokployProvider({
+      config: {
+        app: { slug: "cache-app" },
+        deploy: { provider: { url: "https://dokploy.example.test", apiKey: "dummy", serverId: "server-1" } },
+      },
+      state: { dokploy: {} },
+    });
+    const redisId = await provider.ensureRedis("environment-1", {
+      redis: { password: "secret-password" },
+    });
+    assert.equal(redisId, "redis-1");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  const create = calls.find((call) => call.path === "/api/redis.create");
+  assert.equal(create.body.name, "cache-app-redis");
+  assert.equal(create.body.appName, "cache-app-redis");
+  assert.equal(create.body.dockerImage, DOKPLOY_REDIS_IMAGE);
+  assert.equal(create.body.environmentId, "environment-1");
+  assert.equal(create.body.serverId, "server-1");
+  assert.match(create.body.description, /Dragonfly/);
+
+  const update = calls.find((call) => call.path === "/api/redis.update");
+  assert.equal(update.body.redisId, "redis-1");
+  assert.equal(update.body.name, "cache-app-redis");
+  assert.equal(update.body.appName, "cache-app-redis-a1b2c3");
+  assert.equal(update.body.dockerImage, DOKPLOY_REDIS_IMAGE);
+  assert.equal(update.body.databasePassword, "secret-password");
+  assert.equal(update.body.command, DOKPLOY_REDIS_COMMAND);
+  assert.deepEqual(update.body.args, [...DOKPLOY_REDIS_ARGS, "--requirepass", "secret-password"]);
+  assert.equal(update.body.env, "REDIS_PASSWORD=secret-password\n");
+
+  const deploy = calls.find((call) => call.path === "/api/redis.deploy");
+  assert.deepEqual(deploy.body, { redisId: "redis-1" });
 });
 
 test("expected Compose domains include MinIO route only for public buckets", () => {

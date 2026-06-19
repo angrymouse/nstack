@@ -56,8 +56,8 @@ For the detailed operator guide, see [USING_NSTACK.md](USING_NSTACK.md).
 ## Dokploy Model
 
 - Dokploy Projects and Environments own the app.
-- Dokploy native Postgres and Redis are created when Encore declares SQL
-  databases or cache clusters.
+- Dokploy native Postgres and Redis-compatible Dragonfly cache resources are
+  created when Encore declares SQL databases or cache clusters.
 - Dokploy Compose builds and runs the backend/frontend services plus generated
   support services such as NSQ for Pub/Sub and MinIO for Encore object storage
   buckets.
@@ -69,6 +69,11 @@ For the detailed operator guide, see [USING_NSTACK.md](USING_NSTACK.md).
 
 There is no Caddy container and no manual Traefik label surface in generated
 Compose.
+
+Cache resources are still addressed through Encore/Dokploy Redis connection
+settings, but new Dokploy cache resources use the official Dragonfly image by
+default. Existing Dokploy Redis resources are reused instead of replaced during
+normal code deploys.
 
 ## Builds
 

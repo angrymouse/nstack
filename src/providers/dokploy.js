@@ -1,4 +1,8 @@
-import { idOf, parseDotEnv, slugify } from "../util.js";
+import { formatDotEnv, idOf, parseDotEnv, slugify } from "../util.js";
+
+export const DOKPLOY_REDIS_IMAGE = "docker.dragonflydb.io/dragonflydb/dragonfly";
+export const DOKPLOY_REDIS_COMMAND = "dragonfly";
+export const DOKPLOY_REDIS_ARGS = ["--logtostderr", "--dir", "/data", "--dbfilename", "dump"];
 
 export class DokployClient {
   constructor({ url, apiKey }) {
@@ -137,13 +141,27 @@ export class DokployProvider {
       name,
       appName: name,
       databasePassword: infra.redis.password,
-      dockerImage: "redis:7-alpine",
+      dockerImage: DOKPLOY_REDIS_IMAGE,
       environmentId,
-      description: "Managed by nstack",
+      description: "Managed by nstack (Dragonfly Redis-compatible cache)",
       ...serverPart(this.config),
     });
     const id = idOf(created, ["redisId", "id"]);
-    if (id) await this.client.apiPost("redis.deploy", { redisId: id });
+    if (id) {
+      const redis = await this.client.apiGet("redis.one", { redisId: id }).catch(() => null);
+      const appName = redis?.appName || name;
+      await this.client.apiPost("redis.update", {
+        redisId: id,
+        name,
+        appName,
+        databasePassword: infra.redis.password,
+        dockerImage: DOKPLOY_REDIS_IMAGE,
+        command: DOKPLOY_REDIS_COMMAND,
+        args: [...DOKPLOY_REDIS_ARGS, "--requirepass", infra.redis.password],
+        env: formatDotEnv({ REDIS_PASSWORD: infra.redis.password }),
+      });
+      await this.client.apiPost("redis.deploy", { redisId: id });
+    }
     return id;
   }
 

@@ -19,6 +19,8 @@ The generated app stays ordinary:
 - Dokploy Domains/Traefik route traffic; nstack does not add Caddy or a proxy container.
 - Dokploy Compose builds and runs backend and frontend containers.
 - Dokploy native resources are used where they map to Encore resources.
+- Encore cache resources are backed by Dokploy's Redis resource type, using
+  Dragonfly as the Redis-compatible engine for new resources.
 - Generated support services fill the remaining Encore primitives: NSQ for Pub/Sub and MinIO for object storage buckets.
 - Encore `secret()` values are pushed as Dokploy Compose environment variables, not committed into source.
 
@@ -347,7 +349,8 @@ During the first deploy, nstack will:
 - Generate Encore infra config.
 - Generate Dokploy Compose.
 - Create or reuse the Dokploy project and environment.
-- Create or reuse managed Postgres or Redis when Encore resources require them.
+- Create or reuse managed Postgres or Redis-compatible Dragonfly cache resources
+  when Encore resources require them.
 - Add generated support services for Encore Pub/Sub and object storage when required.
 - Create or update the Dokploy Compose app.
 - Save Compose environment values.
@@ -541,13 +544,18 @@ On deploy, nstack can create or update:
 - Dokploy project/environment lookup by name.
 - A Dokploy Compose app.
 - Dokploy native Postgres when Encore declares SQL databases.
-- Dokploy native Redis when Encore declares cache resources.
+- Dokploy native Redis-compatible Dragonfly cache resources when Encore declares
+  cache resources.
 - Compose services for backend, frontend, NSQ Pub/Sub, and MinIO object storage.
 - Domains/Traefik routes for frontend, API traffic, and public object buckets.
 - Compose environment variables for generated infrastructure credentials and Encore `secret()` values.
 - Dokploy schedules for Encore cron jobs.
 
 The generated Compose file is not meant to be hand-edited. Change source config, backend code, frontend code, or nstack config, then re-render or deploy.
+
+Existing Dokploy Redis resources are reused by name and state id. A normal code
+deploy does not recreate or repull the cache image; Dragonfly is the default for
+new cache resources that nstack creates after this version.
 
 ## Daily Commands
 
