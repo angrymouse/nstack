@@ -15,7 +15,7 @@ import {
 } from "./config.js";
 import { createDoctorReport, inspectResources, preflightError, preflightFailures } from "./doctor.js";
 import { normalizeTargetPlatform } from "./platform.js";
-import { DokployProvider, existingInfraSecretError } from "./providers/dokploy.js";
+import { DokployProvider, existingInfraSecretError, sourceRefLabelForConfig } from "./providers/dokploy.js";
 import { renderDokployCompose } from "./render/compose.js";
 import { renderEncoreInfra } from "./render/infra.js";
 import { Prompter } from "./prompt.js";
@@ -831,11 +831,12 @@ export async function verify({ config = null, release = null, cwd = process.cwd(
   const loadedConfig = config || await loadConfig(cwd, { target });
   const state = loadState(cwd, loadedConfig.deploy.target);
   const loadedRelease = release || state.lastAttempt || state.lastRelease || releaseInfo(loadedConfig, cwd);
+  const expectedCommit = expectedVerifyCommit(loadedConfig, loadedRelease);
   const base = `https://${loadedConfig.app.domain}`;
   const deadline = Date.now() + Math.max(0, loadedConfig.verify.timeoutSeconds * 1000);
   let report = null;
   for (;;) {
-    report = await verifyReport(loadedConfig, loadedRelease, base);
+    report = await verifyReport(loadedConfig, loadedRelease, base, { expectedCommit });
     if (report.ok) {
       if (json && !quiet) console.log(JSON.stringify(report, null, 2));
       else if (!quiet) console.log(`Verified ${base}`);
@@ -849,10 +850,10 @@ export async function verify({ config = null, release = null, cwd = process.cwd(
   throw verifyReportError(report, base);
 }
 
-async function verifyReport(config, release, base) {
+async function verifyReport(config, release, base, options = {}) {
   const endpoints = [];
   for (const endpoint of config.verify.endpoints) {
-    endpoints.push(await verifyEndpoint(base, endpoint, release));
+    endpoints.push(await verifyEndpoint(base, endpoint, release, options));
   }
   const failed = endpoints.find((endpoint) => !endpoint.ok);
   return {
@@ -873,11 +874,12 @@ async function verifyReport(config, release, base) {
   };
 }
 
-async function verifyEndpoint(base, endpoint, release) {
+async function verifyEndpoint(base, endpoint, release, options = {}) {
   const startedAt = Date.now();
   const name = endpoint.name || endpoint.path;
   const expectStatus = endpoint.expectStatus || 200;
   const url = `${base}${endpoint.path}`;
+  const expectedCommit = endpoint.expectCommit ? options.expectedCommit || release.commit || "" : "";
   const result = {
     name,
     path: endpoint.path,
@@ -887,6 +889,7 @@ async function verifyEndpoint(base, endpoint, release) {
     ok: false,
     durationMs: 0,
     expectCommit: Boolean(endpoint.expectCommit),
+    expectedCommit: expectedCommit || null,
     error: null,
   };
   try {
@@ -903,8 +906,8 @@ async function verifyEndpoint(base, endpoint, release) {
         return finishVerifyEndpoint(result, startedAt);
       }
     }
-    if (endpoint.expectCommit && release.commit && !text.includes(release.commit)) {
-      result.error = `${name} did not contain commit ${release.commit}`;
+    if (expectedCommit && !text.includes(expectedCommit)) {
+      result.error = `${name} did not contain commit ${expectedCommit}`;
       return finishVerifyEndpoint(result, startedAt);
     }
     result.ok = true;
@@ -913,6 +916,19 @@ async function verifyEndpoint(base, endpoint, release) {
     result.error = error instanceof Error ? error.message : String(error);
     return finishVerifyEndpoint(result, startedAt);
   }
+}
+
+function expectedVerifyCommit(config, release) {
+  if (!release?.commit) return "";
+  if (isSourceBackedCompose(config)) {
+    return sourceRefLabelForConfig(config.deploy.source) || release.commit;
+  }
+  return release.commit;
+}
+
+function isSourceBackedCompose(config) {
+  const sourceType = config.deploy.source?.sourceType || "";
+  return config.deploy.buildMode === "compose" && Boolean(sourceType) && sourceType !== "raw";
 }
 
 function finishVerifyEndpoint(result, startedAt) {

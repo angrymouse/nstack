@@ -212,3 +212,53 @@ test("verify --json reports endpoint checks and prefers the latest attempted rel
   ]);
   assert.doesNotMatch(output.join("\n"), /Verified/);
 });
+
+test("verify accepts source-backed runtime ref labels while preserving release sha", async () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "nstack-verify-source-"));
+  mkdirSync(path.join(cwd, ".nstack"), { recursive: true });
+  writeFileSync(path.join(cwd, "nstack.config.mjs"), `export default {
+    app: { name: "Verify Source", slug: "verify-source", domain: "verify-source.example.test" },
+    deploy: {
+      buildMode: "compose",
+      source: {
+        sourceType: "gitea",
+        repository: "git@git.example.test:acme/verify-source.git",
+        branch: "main"
+      }
+    },
+    verify: { timeoutSeconds: 1, endpoints: [
+      { name: "status", path: "/api/status", expectStatus: 200, expectCommit: true }
+    ] }
+  };\n`);
+  writeFileSync(path.join(cwd, ".nstack", "state.json"), `${JSON.stringify({
+    lastAttempt: {
+      commit: "1234567890abcdef1234567890abcdef12345678",
+      tag: "1234567890ab",
+      builtAt: "2026-06-17T00:01:00.000Z",
+      status: "triggered",
+      triggeredAt: "2026-06-17T00:02:00.000Z",
+    },
+  })}\n`);
+
+  const originalFetch = globalThis.fetch;
+  const output = [];
+  const originalLog = console.log;
+  try {
+    globalThis.fetch = async (url) => {
+      assert.equal(url, "https://verify-source.example.test/api/status");
+      return new Response("running acme/verify-source@main", { status: 200 });
+    };
+    console.log = (line = "") => output.push(String(line));
+
+    const report = await runCli(["--cwd", cwd, "verify", "--json"]);
+    assert.equal(report.ok, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+    console.log = originalLog;
+  }
+
+  const report = JSON.parse(output.join("\n"));
+  assert.equal(report.release.commit, "1234567890abcdef1234567890abcdef12345678");
+  assert.equal(report.endpoints[0].expectedCommit, "acme/verify-source@main");
+  assert.equal(report.endpoints[0].ok, true);
+});

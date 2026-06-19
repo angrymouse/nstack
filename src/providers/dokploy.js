@@ -229,7 +229,7 @@ export class DokployProvider {
       bitbucketRepositorySlug: sourceConfig.bitbucketRepositorySlug || parsed.repository,
       composePath: sourceConfig.composePath || "deploy/nstack/compose.dokploy.yaml",
       watchPaths: sourceConfig.watchPaths || [],
-      refLabel: `${parsed.pathNamespace}@${branch}`,
+      refLabel: sourceRefLabelForConfig(sourceConfig),
     };
   }
 
@@ -587,8 +587,16 @@ function plainGitSource(sourceConfig, parsed, branch) {
     sshKeyId: sourceConfig.sshKeyId || "",
     composePath: sourceConfig.composePath || "deploy/nstack/compose.dokploy.yaml",
     watchPaths: sourceConfig.watchPaths || [],
-    refLabel: `${parsed.pathNamespace}@${branch}`,
+    refLabel: sourceRefLabelForConfig(sourceConfig),
   };
+}
+
+export function sourceRefLabelForConfig(sourceConfig = {}) {
+  const repository = sourceConfig.repository || "";
+  const branch = sourceConfig.branch || "";
+  const parsed = parseGitRepository(repository);
+  if (!parsed || !branch) return "";
+  return `${parsed.pathNamespace}@${branch}`;
 }
 
 function parseGitRepository(repository = "") {
