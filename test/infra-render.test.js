@@ -29,3 +29,24 @@ test("infra renderer keeps Encore database resource key separate from physical d
   assert.deepEqual(Object.keys(infra.sql_servers[0].databases), ["app"]);
   assert.equal(infra.sql_servers[0].databases.app.name, "demo_prod");
 });
+
+test("infra renderer uses app-specific NSQ hostnames for shared Dokploy hosts", () => {
+  const output = renderEncoreInfra({
+    config: {
+      app: { slug: "demo", domain: "demo.example.test" },
+      deploy: { target: "prod" },
+    },
+    resources: {
+      services: [{ name: "api" }],
+      metadata: { gateways: ["api-gateway"] },
+      databases: [],
+      topics: [{ name: "events", subscriptions: [{ name: "consumer" }] }],
+      caches: [],
+      secrets: [],
+    },
+    infra: {},
+  });
+
+  const infra = JSON.parse(output);
+  assert.equal(infra.pubsub[0].hosts, "demo-nsqd:4150");
+});

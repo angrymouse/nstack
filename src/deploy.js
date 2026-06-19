@@ -52,6 +52,7 @@ export async function deploy(options = {}) {
   const skipBuild = Boolean(options.skipBuild || options.prebuilt || config.deploy.buildMode === "compose");
   const release = resolveRelease(config, cwd, { ...options, skipBuild });
   const resources = await inspectResources(cwd, config);
+  const timings = [];
   const localOnly = options.renderOnly || options.dryRun || options.buildOnly;
   const command = options.buildOnly ? "build" : localOnly ? "render" : "deploy";
   const initialReport = await createDoctorReport({ cwd, config, state, resources });
@@ -70,6 +71,9 @@ export async function deploy(options = {}) {
   if (!localOnly) {
     const secretsReport = await createDoctorReport({ cwd, config, state, resources });
     assertPreflight("deploy", secretsReport, { skipBuild });
+    const preflightProvider = new DokployProvider({ config, state });
+    await timedAsync("dokploy: validate dns", true, timings, () => preflightProvider.validateAppDomain());
+    await timedAsync("dokploy: enable docker cleanup", true, timings, () => preflightProvider.enableDockerCleanup());
   }
   const infra = ensureInfraSecrets({ config, resources, state });
   const generatedInfraSecrets = {
@@ -92,7 +96,6 @@ export async function deploy(options = {}) {
   const infraFile = path.join(cwd, generatedDir, "encore.infra.json");
   const composeFile = path.join(cwd, generatedDir, "compose.dokploy.yaml");
   const releaseFile = releaseManifestPath(cwd);
-  const timings = [];
   ensureDir(path.dirname(infraFile));
   let infraText = renderEncoreInfra({ config, state, resources, infra, release, secretEnv });
   let artifacts = deploymentArtifacts({ config, release, infraText, localContext: localOnly });
@@ -248,6 +251,7 @@ export async function deploy(options = {}) {
     }
 
     await runReleaseChecks(cwd, config, release, options);
+    await timedAsync("dokploy: clean unused images", true, timings, () => provider.cleanUnusedImages());
   } catch (error) {
     nextState.lastAttempt = releaseAttempt(release, {
       status: "failed",
@@ -290,6 +294,10 @@ export async function waitForDeployment(options = {}) {
   const release = releaseFromState(state);
 
   await runReleaseChecks(cwd, config, release, options);
+  if (config.deploy.provider.url && config.deploy.provider.apiKey) {
+    const provider = new DokployProvider({ config, state });
+    await provider.cleanUnusedImages();
+  }
 
   const nextState = {
     ...state,
@@ -337,6 +345,7 @@ export async function redeploy(options = {}) {
 
   try {
     await runReleaseChecks(cwd, config, release, options);
+    await provider.cleanUnusedImages();
     finalizeReleaseState(nextState, release, options, {
       triggeredAt: nextState.lastAttempt.triggeredAt,
     });
@@ -1263,6 +1272,15 @@ function deploymentReport({ mode, config, resources, images, artifacts = null, r
 function timed(label, quiet, timings, task) {
   const startedAt = performance.now();
   const result = task();
+  const durationMs = performance.now() - startedAt;
+  if (timings) timings.push({ name: label, ms: Math.round(durationMs) });
+  if (!quiet) console.log(`${label}: ${(durationMs / 1000).toFixed(2)}s`);
+  return result;
+}
+
+async function timedAsync(label, quiet, timings, task) {
+  const startedAt = performance.now();
+  const result = await task();
   const durationMs = performance.now() - startedAt;
   if (timings) timings.push({ name: label, ms: Math.round(durationMs) });
   if (!quiet) console.log(`${label}: ${(durationMs / 1000).toFixed(2)}s`);

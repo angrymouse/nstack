@@ -262,6 +262,43 @@ export class DokployProvider {
     }
   }
 
+  async validateAppDomain() {
+    const domain = this.config.app.domain || "";
+    if (!domain) throw new Error("App domain is required before Dokploy DNS validation.");
+    const serverIp = await this.domainValidationServerIp();
+    const result = await this.client.apiPost("domain.validateDomain", {
+      domain,
+      ...(serverIp ? { serverIp } : {}),
+    });
+    const report = summarizeDomainValidation(result, domain, serverIp);
+    if (!report.valid) {
+      const expected = report.expectedIp || "the Dokploy server";
+      const resolved = report.resolvedIp || "(unresolved)";
+      throw new Error(`DNS for ${domain} resolves to ${resolved}, expected ${expected}. Point the domain at Dokploy before deploying.`);
+    }
+    return report;
+  }
+
+  async domainValidationServerIp() {
+    const serverId = this.config.deploy.provider.serverId || "";
+    if (serverId) {
+      try {
+        const server = await this.client.apiGet("server.one", { serverId });
+        const ip = publicIpFromValue(server);
+        if (ip) return ip;
+      } catch {
+        // Fall through to Dokploy's own current server IP helper.
+      }
+    }
+    try {
+      const ip = publicIpFromValue(await this.client.apiGet("settings.getIp"));
+      if (ip) return ip;
+    } catch {
+      // Older Dokploy versions may not expose settings.getIp.
+    }
+    return publicIpFromValue(await this.client.apiGet("server.publicIp"));
+  }
+
   async upsertDomain(existing, payload) {
     const current = existing.find((domain) =>
       domain.host === payload.host &&
@@ -345,6 +382,19 @@ export class DokployProvider {
       composeId,
       title: `nstack retry ${release.tag}`,
       description: `Redeploy ${release.commit}`,
+    });
+  }
+
+  async cleanUnusedImages() {
+    return this.client.apiPost("settings.cleanUnusedImages", {
+      ...serverPart(this.config),
+    });
+  }
+
+  async enableDockerCleanup() {
+    return this.client.apiPost("settings.updateDockerCleanup", {
+      enableDockerCleanup: true,
+      ...serverPart(this.config),
     });
   }
 
@@ -786,6 +836,24 @@ function summarizeDomain(value) {
     certificateType: value?.certificateType || "",
     stripPath: Boolean(value?.stripPath),
   };
+}
+
+function summarizeDomainValidation(value, domain, expectedIp = "") {
+  return {
+    domain,
+    valid: value?.isValid !== false,
+    resolvedIp: value?.resolvedIp || value?.ip || value?.address || "",
+    expectedIp,
+  };
+}
+
+function publicIpFromValue(value) {
+  if (typeof value === "string") return value.trim();
+  if (!value || typeof value !== "object") return "";
+  for (const key of ["publicIp", "serverIp", "ip", "ipAddress", "address", "host"]) {
+    if (typeof value[key] === "string" && value[key].trim()) return value[key].trim();
+  }
+  return "";
 }
 
 function summarizeSchedule(value) {

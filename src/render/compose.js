@@ -3,6 +3,8 @@ import { stringifyYaml } from "./yaml.js";
 export function renderDokployCompose(ctx) {
   const { config, resources, images = {}, release, build = null } = ctx;
   const backendHost = `${config.app.slug}-backend`;
+  const nsqdHost = `${config.app.slug}-nsqd`;
+  const nsqlookupdHost = `${config.app.slug}-nsqlookupd`;
   const doc = {
     name: config.app.slug,
     services: {
@@ -56,13 +58,23 @@ export function renderDokployCompose(ctx) {
       restart: "unless-stopped",
       command: "/nsqlookupd",
       expose: ["4160", "4161"],
+      networks: {
+        default: {
+          aliases: [nsqlookupdHost],
+        },
+      },
     };
     doc.services.nsqd = {
       image: "nsqio/nsq:v1.3.0",
       restart: "unless-stopped",
-      command: "/nsqd --lookupd-tcp-address=nsqlookupd:4160 --broadcast-address=nsqd --data-path=/data",
+      command: `/nsqd --lookupd-tcp-address=${nsqlookupdHost}:4160 --broadcast-address=${nsqdHost} --data-path=/data`,
       volumes: ["nsq_data:/data"],
       expose: ["4150", "4151"],
+      networks: {
+        default: {
+          aliases: [nsqdHost],
+        },
+      },
       depends_on: {
         nsqlookupd: { condition: "service_started" },
       },

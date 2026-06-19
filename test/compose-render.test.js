@@ -11,7 +11,7 @@ test("compose renderer quotes dynamic values and omits cron runner containers", 
     resources: {
       databases: [{ name: "app" }],
       caches: [],
-      topics: [],
+      topics: [{ name: "events", subscriptions: [] }],
       secrets: ["API_TOKEN"],
       crons: [{ name: "nightly" }],
     },
@@ -30,6 +30,8 @@ test("compose renderer quotes dynamic values and omits cron runner containers", 
   assert.match(output, /NSTACK_POSTGRES_PASSWORD: "\$\{NSTACK_POSTGRES_PASSWORD:\?set NSTACK_POSTGRES_PASSWORD\}"/);
   assert.match(output, /NUXT_API_SERVER_BASE_URL: "http:\/\/quoted-app-backend:8080"/);
   assert.match(output, /aliases:\n          - "quoted-app-backend"/);
+  assert.match(output, /command: "\/nsqd --lookupd-tcp-address=quoted-app-nsqlookupd:4160 --broadcast-address=quoted-app-nsqd --data-path=\/data"/);
+  assert.match(output, /aliases:\n          - "quoted-app-nsqd"/);
   assert.doesNotMatch(output, /cron-runner/);
 });
 

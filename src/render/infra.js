@@ -46,7 +46,7 @@ export function renderEncoreInfra(ctx) {
     result.pubsub = [
       {
         type: "nsq",
-        hosts: "nsqd:4150",
+        hosts: `${appId}-nsqd:4150`,
         topics: Object.fromEntries(resources.topics.map((topic) => [
           topic.name,
           {
