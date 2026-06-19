@@ -2,6 +2,7 @@ import { stringifyYaml } from "./yaml.js";
 
 export function renderDokployCompose(ctx) {
   const { config, resources, images = {}, release, build = null } = ctx;
+  const backendHost = `${config.app.slug}-backend`;
   const doc = {
     name: config.app.slug,
     services: {
@@ -15,9 +16,10 @@ export function renderDokployCompose(ctx) {
           NITRO_HOST: "0.0.0.0",
           NITRO_PORT: "3000",
           NUXT_PUBLIC_API_BASE_URL: "/api",
-          NUXT_API_SERVER_BASE_URL: "http://backend:8080",
-          NUXT_API_INTERNAL_BASE_URL: "http://backend:8080",
+          NUXT_API_SERVER_BASE_URL: `http://${backendHost}:8080`,
+          NUXT_API_INTERNAL_BASE_URL: `http://${backendHost}:8080`,
           NSTACK_APP_SLUG: config.app.slug,
+          NSTACK_BACKEND_HOST: backendHost,
           NSTACK_GIT_COMMIT: "${NSTACK_GIT_COMMIT:-local}",
           NSTACK_IMAGE_TAG: "${NSTACK_IMAGE_TAG:-local}",
         },
@@ -31,6 +33,11 @@ export function renderDokployCompose(ctx) {
         restart: "unless-stopped",
         environment: backendEnv(ctx),
         expose: ["8080"],
+        networks: {
+          default: {
+            aliases: [backendHost],
+          },
+        },
         healthcheck: {
           test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/__encore/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""],
           interval: "15s",

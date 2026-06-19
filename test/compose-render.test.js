@@ -28,6 +28,8 @@ test("compose renderer quotes dynamic values and omits cron runner containers", 
   assert.match(output, /image: "ghcr\.io\/acme\/app\/backend:tag:with:colon"/);
   assert.match(output, /APP_VERSION: "\$\{NSTACK_GIT_COMMIT:-local\}"/);
   assert.match(output, /NSTACK_POSTGRES_PASSWORD: "\$\{NSTACK_POSTGRES_PASSWORD:\?set NSTACK_POSTGRES_PASSWORD\}"/);
+  assert.match(output, /NUXT_API_SERVER_BASE_URL: "http:\/\/quoted-app-backend:8080"/);
+  assert.match(output, /aliases:\n          - "quoted-app-backend"/);
   assert.doesNotMatch(output, /cron-runner/);
 });
 

@@ -5,7 +5,8 @@ function clean(value: unknown): string {
 export function apiBaseUrl(): string {
   const config = useRuntimeConfig();
   if (import.meta.server) {
-    return clean(config.apiServerBaseUrl) || "http://backend:8080";
+    const backendHost = process.env.NSTACK_BACKEND_HOST || "backend";
+    return clean(config.apiServerBaseUrl) || `http://${backendHost}:8080`;
   }
   return clean(config.public.apiBaseUrl) || "/api";
 }
