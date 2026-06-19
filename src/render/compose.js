@@ -1,6 +1,8 @@
 import { objectStorageBucketName } from "../resource-names.js";
 import { stringifyYaml } from "./yaml.js";
 
+export const ENCORE_MIGRATE_IMAGE = "migrate/migrate:v4.15.2";
+
 export function renderDokployCompose(ctx) {
   const { config, images = {}, release, build = null } = ctx;
   const resources = normalizeResources(ctx.resources);
@@ -9,6 +11,7 @@ export function renderDokployCompose(ctx) {
   const minioHost = `${config.app.slug}-minio`;
   const nsqdHost = `${config.app.slug}-nsqd`;
   const nsqlookupdHost = `${config.app.slug}-nsqlookupd`;
+  const migrationServices = databaseMigrationServices(renderCtx);
   const doc = {
     name: config.app.slug,
     services: {
@@ -51,10 +54,14 @@ export function renderDokployCompose(ctx) {
           retries: 8,
           start_period: "30s",
         },
-        depends_on: backendDependsOn(resources),
+        depends_on: backendDependsOn(resources, migrationServices),
       },
     },
   };
+  Object.assign(doc.services, migrationServices);
+  if (Object.keys(migrationServices).length > 0) {
+    doc.networks = { ...(doc.networks || {}), "dokploy-network": { external: true } };
+  }
 
   if (resources.topics.length > 0) {
     doc.services.nsqlookupd = {
@@ -94,12 +101,13 @@ export function renderDokployCompose(ctx) {
       environment: {
         MINIO_ROOT_USER: "${NSTACK_MINIO_ACCESS_KEY:?set NSTACK_MINIO_ACCESS_KEY}",
         MINIO_ROOT_PASSWORD: "${NSTACK_MINIO_SECRET_KEY:?set NSTACK_MINIO_SECRET_KEY}",
+        MINIO_DOMAIN: minioHost,
       },
       volumes: ["minio_data:/data"],
       expose: ["9000"],
       networks: {
         default: {
-          aliases: [minioHost],
+          aliases: minioAliases(config, resources.buckets, minioHost),
         },
       },
       healthcheck: {
@@ -117,8 +125,8 @@ export function renderDokployCompose(ctx) {
         MINIO_ROOT_USER: "${NSTACK_MINIO_ACCESS_KEY:?set NSTACK_MINIO_ACCESS_KEY}",
         MINIO_ROOT_PASSWORD: "${NSTACK_MINIO_SECRET_KEY:?set NSTACK_MINIO_SECRET_KEY}",
       },
-      entrypoint: ["/bin/sh", "-c"],
-      command: minioInitScript(config, resources.buckets, minioHost),
+      entrypoint: ["/bin/sh"],
+      command: ["-c", minioInitScript(config, resources.buckets, minioHost)],
       depends_on: {
         minio: { condition: "service_healthy" },
       },
@@ -190,10 +198,71 @@ function backendEnv(ctx) {
   return env;
 }
 
-function backendDependsOn(resources) {
+function backendDependsOn(resources, migrationServices = {}) {
   const deps = {};
+  for (const serviceName of Object.keys(migrationServices)) {
+    deps[serviceName] = { condition: "service_completed_successfully" };
+  }
   if (resources.topics.length > 0) deps.nsqd = { condition: "service_started" };
   return Object.keys(deps).length ? deps : undefined;
+}
+
+function databaseMigrationServices(ctx) {
+  const { config, infra, resources } = ctx;
+  if (!resources.databases.length || !infra?.postgres?.host) return {};
+  return Object.fromEntries(resources.databases
+    .filter((database) => database.migrations)
+    .map((database) => [
+      migrationServiceName(database),
+      {
+        image: ENCORE_MIGRATE_IMAGE,
+        restart: "on-failure:5",
+        command: [
+          "-path=/migrations",
+          `-database=${postgresMigrationUrl(infra, resources, database)}`,
+          "up",
+        ],
+        volumes: [
+          `${migrationHostPath(config, database)}:/migrations:ro`,
+        ],
+        networks: {
+          "dokploy-network": {},
+        },
+      },
+    ]));
+}
+
+function migrationServiceName(database) {
+  const suffix = String(database.name || "app")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "app";
+  return `migrate-${suffix}`;
+}
+
+function migrationHostPath(config, database) {
+  const backend = normalizeRelativePath(config.paths?.backend || "backend");
+  const migrations = normalizeRelativePath(database.migrations);
+  return `../../${backend}/${migrations}`;
+}
+
+function normalizeRelativePath(value) {
+  return String(value || "")
+    .replaceAll("\\", "/")
+    .replace(/^\.?\//, "")
+    .replace(/\/+$/g, "");
+}
+
+function postgresMigrationUrl(infra, resources, database) {
+  const databaseName = resources.databases.length === 1 ? infra.postgres.database : database.name;
+  return `postgres://${infra.postgres.user}:\${NSTACK_POSTGRES_PASSWORD:?set NSTACK_POSTGRES_PASSWORD}@${infra.postgres.host}/${databaseName}?sslmode=disable`;
+}
+
+function minioAliases(config, buckets, minioHost) {
+  return [
+    minioHost,
+    ...buckets.map((bucket) => `${objectStorageBucketName(config.app.slug, bucket)}.${minioHost}`),
+  ];
 }
 
 function minioInitScript(config, buckets, minioHost) {

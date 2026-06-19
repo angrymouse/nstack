@@ -98,6 +98,9 @@ test("init keeps deploy target values out of source config", async () => {
   const backendManifest = JSON.parse(readFileSync(path.join(target, "backend", "package.json"), "utf8"));
   assert.equal(backendManifest.scripts.test, "node --test");
 
+  const backendDockerfile = readFileSync(path.join(target, "backend", "Dockerfile"), "utf8");
+  assert.match(backendDockerfile, /apt-get install -y --no-install-recommends ca-certificates/);
+
   const backendTsconfig = JSON.parse(readFileSync(path.join(target, "backend", "tsconfig.json"), "utf8"));
   assert.equal(backendTsconfig.compilerOptions.module, "ESNext");
   assert.equal(backendTsconfig.compilerOptions.moduleResolution, "Bundler");
@@ -142,6 +145,56 @@ test("cli flags do not mutate process env while writing local config", async () 
   const localEnv = readFileSync(path.join(target, ".nstack", "local.env"), "utf8");
   assert.match(localEnv, /NSTACK_DOMAIN=linked\.example\.test/);
   assert.match(localEnv, /NSTACK_REGISTRY=ghcr\.io\/acme\/linked/);
+});
+
+test("configure persists provider-specific source settings non-interactively", async () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "nstack-configure-source-"));
+  const target = path.join(cwd, "app");
+
+  await runCli(["init", target, "--yes"]);
+  const previousCwd = process.cwd();
+  process.chdir(target);
+  try {
+    await runCli([
+      "configure",
+      "--yes",
+      "--domain",
+      "demo.example.test",
+      "--dokploy-url",
+      "https://dokploy.example.test",
+      "--dokploy-api-key",
+      "secret-token",
+      "--project",
+      "Demo Project",
+      "--environment",
+      "production",
+      "--repository",
+      "git@git.example.test:acme/demo.git",
+      "--branch",
+      "main",
+      "--source-type",
+      "gitea",
+      "--gitea-id",
+      "gitea-1",
+      "--compose-path",
+      "deploy/nstack/compose.dokploy.yaml",
+      "--watch-paths",
+      "backend/**,frontend/**,deploy/nstack/**",
+    ]);
+  } finally {
+    process.chdir(previousCwd);
+  }
+
+  const localEnv = readFileSync(path.join(target, ".nstack", "local.env"), "utf8");
+  assert.match(localEnv, /NSTACK_DOMAIN=demo\.example\.test/);
+  assert.match(localEnv, /DOKPLOY_PROJECT="Demo Project"/);
+  assert.match(localEnv, /DOKPLOY_ENVIRONMENT=production/);
+  assert.match(localEnv, /NSTACK_REPOSITORY=git@git\.example\.test:acme\/demo\.git/);
+  assert.match(localEnv, /NSTACK_BRANCH=main/);
+  assert.match(localEnv, /NSTACK_SOURCE_TYPE=gitea/);
+  assert.match(localEnv, /NSTACK_GITEA_ID=gitea-1/);
+  assert.match(localEnv, /NSTACK_COMPOSE_PATH=deploy\/nstack\/compose\.dokploy\.yaml/);
+  assert.match(localEnv, /NSTACK_WATCH_PATHS="backend\/\*\*,frontend\/\*\*,deploy\/nstack\/\*\*"/);
 });
 
 test("init skips deploy wizard when stdin is not interactive", async () => {

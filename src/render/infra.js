@@ -3,6 +3,7 @@ import { objectStorageBucketName } from "../resource-names.js";
 export function renderEncoreInfra(ctx) {
   const { config, infra } = ctx;
   const resources = normalizeResources(ctx.resources);
+  const materializeSecrets = Boolean(ctx.materializeSecrets);
   const baseUrl = `https://${config.app.domain}/api`;
   const appId = config.app.slug;
   const gatewayNames = hostedGatewayNames(resources);
@@ -36,7 +37,7 @@ export function renderEncoreInfra(ctx) {
           {
             name: resources.databases.length === 1 ? infra.postgres.database : database.name,
             username: infra.postgres.user,
-            password: { $env: "NSTACK_POSTGRES_PASSWORD" },
+            password: infraSecret(materializeSecrets, infra.postgres.password, "NSTACK_POSTGRES_PASSWORD", "Postgres password"),
             min_connections: 1,
             max_connections: 30,
           },
@@ -68,8 +69,8 @@ export function renderEncoreInfra(ctx) {
     result.object_storage = [
       {
         type: "s3",
-        access_key_id: { $env: "NSTACK_MINIO_ACCESS_KEY" },
-        secret_access_key: { $env: "NSTACK_MINIO_SECRET_KEY" },
+        access_key_id: infraSecret(materializeSecrets, infra.objectStorage.accessKey, "NSTACK_MINIO_ACCESS_KEY", "object storage access key"),
+        secret_access_key: infraSecret(materializeSecrets, infra.objectStorage.secretKey, "NSTACK_MINIO_SECRET_KEY", "object storage secret key"),
         region: infra.objectStorage.region,
         endpoint: infra.objectStorage.endpoint,
         buckets: Object.fromEntries(resources.buckets.map((bucket) => [
@@ -90,15 +91,23 @@ export function renderEncoreInfra(ctx) {
         host: infra.redis.host,
         database_index: index,
         key_prefix: `${appId}:${cache.name}:`,
+        in_memory: false,
+        tls_config: { disabled: true },
         auth: {
           type: "auth_string",
-          auth_string: { $env: "NSTACK_REDIS_PASSWORD" },
+          auth_string: infraSecret(materializeSecrets, infra.redis.password, "NSTACK_REDIS_PASSWORD", "Redis password"),
         },
       },
     ]));
   }
 
   return `${JSON.stringify(stripUndefined(result), null, 2)}\n`;
+}
+
+function infraSecret(materialize, value, envName, label) {
+  if (!materialize) return { $env: envName };
+  if (!value) throw new Error(`Cannot materialize ${label}; ${envName} is missing from local infrastructure state.`);
+  return String(value);
 }
 
 function normalizeResources(resources = {}) {

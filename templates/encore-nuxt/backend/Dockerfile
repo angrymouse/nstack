@@ -57,6 +57,11 @@ FROM node:22-bookworm-slim AS runtime
 
 WORKDIR /workspace/backend
 
+RUN --mount=type=cache,id=nstack-backend-runtime-apt,target=/var/cache/apt,sharing=locked \
+  apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
 ARG NSTACK_GIT_COMMIT=local
 ARG NSTACK_IMAGE_TAG=local
 ENV NODE_ENV=production

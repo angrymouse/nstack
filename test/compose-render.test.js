@@ -99,11 +99,54 @@ test("compose renderer provisions MinIO for Encore object storage buckets", () =
   assert.match(output, /minio:\n\s+image: "minio\/minio:latest"/);
   assert.match(output, /MINIO_ROOT_USER: "\$\{NSTACK_MINIO_ACCESS_KEY:\?set NSTACK_MINIO_ACCESS_KEY\}"/);
   assert.match(output, /MINIO_ROOT_PASSWORD: "\$\{NSTACK_MINIO_SECRET_KEY:\?set NSTACK_MINIO_SECRET_KEY\}"/);
+  assert.match(output, /MINIO_DOMAIN: "bucket-app-minio"/);
   assert.match(output, /aliases:\n\s+- "bucket-app-minio"/);
+  assert.match(output, /- "bucket-app-uploads\.bucket-app-minio"/);
+  assert.match(output, /- "bucket-app-public-assets\.bucket-app-minio"/);
   assert.match(output, /minio-init:\n\s+image: "minio\/mc:latest"/);
-  assert.match(output, /entrypoint:\n\s+- "\/bin\/sh"\n\s+- "-c"/);
+  assert.match(output, /entrypoint:\n\s+- "\/bin\/sh"/);
+  assert.match(output, /command:\n\s+- "-c"\n\s+- "until mc alias set local/);
   assert.match(output, /mc mb --ignore-existing local\/bucket-app-uploads/);
   assert.match(output, /mc anonymous set download local\/bucket-app-public-assets/);
   assert.match(output, /backend:[\s\S]*depends_on:[\s\S]*minio:[\s\S]*condition: "service_started"/);
   assert.match(output, /minio_data: \{\}/);
+});
+
+test("compose renderer runs Encore database migrations with the pinned go-migrate image", () => {
+  const output = renderDokployCompose({
+    config: {
+      app: { slug: "migrated-app", domain: "migrated.example.test" },
+      deploy: { target: "prod" },
+      paths: { backend: "backend" },
+    },
+    resources: {
+      databases: [{ name: "app", migrations: "api/migrations" }],
+      caches: [],
+      topics: [],
+      buckets: [],
+      secrets: [],
+      crons: [],
+    },
+    infra: {
+      postgres: {
+        host: "migrated-app-postgres-a1b2c3:5432",
+        database: "app",
+        user: "nstack",
+      },
+    },
+    images: {
+      backend: "ghcr.io/acme/migrated/backend:tag",
+      frontend: "ghcr.io/acme/migrated/frontend:tag",
+    },
+    release: { commit: "abc123", tag: "tag" },
+  });
+
+  assert.match(output, /migrate-app:\n\s+image: "migrate\/migrate:v4\.15\.2"/);
+  assert.match(output, /- "-path=\/migrations"/);
+  assert.match(output, /- "-database=postgres:\/\/nstack:\$\{NSTACK_POSTGRES_PASSWORD:\?set NSTACK_POSTGRES_PASSWORD\}@migrated-app-postgres-a1b2c3:5432\/app\?sslmode=disable"/);
+  assert.match(output, /- "up"/);
+  assert.match(output, /- "\.\.\/\.\.\/backend\/api\/migrations:\/migrations:ro"/);
+  assert.match(output, /migrate-app:[\s\S]*networks:[\s\S]*dokploy-network: \{\}/);
+  assert.match(output, /networks:\n\s+dokploy-network:\n\s+external: true/);
+  assert.match(output, /backend:[\s\S]*depends_on:[\s\S]*migrate-app:[\s\S]*condition: "service_completed_successfully"/);
 });

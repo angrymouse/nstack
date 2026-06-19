@@ -147,13 +147,29 @@ function resourcesFromSource(backendDir) {
     backendDir,
     metadata: hasGateway ? { gateways: [{ encore_name: "api-gateway" }] } : {},
     services: sourceServices(backendDir, fileEntries),
-    databases: matches(content, /new\s+SQLDatabase\s*\(\s*["'`]([^"'`]+)["'`]/g).map((name) => ({ name })),
+    databases: sourceDatabases(content),
     caches: matches(content, /new\s+(?:CacheCluster|RedisCache|Cache)\s*\(\s*["'`]([^"'`]+)["'`]/g).map((name) => ({ name })),
     topics: matches(content, /new\s+Topic\s*\(\s*["'`]([^"'`]+)["'`]/g).map((name) => ({ name, subscriptions: [] })),
     buckets: matches(content, /new\s+Bucket\s*\(\s*["'`]([^"'`]+)["'`]/g).map((name) => ({ name })),
     secrets: [...new Set(matches(content, /(?:secret|Secret)\s*(?:<[^>]+>)?\s*\(\s*["'`]([^"'`]+)["'`]/g))].sort(),
     crons: sourceCrons(content),
   };
+}
+
+function sourceDatabases(content) {
+  const databases = [];
+  const withOptions = /new\s+SQLDatabase\s*\(\s*["'`]([^"'`]+)["'`]\s*,\s*\{([\s\S]*?)\}\s*\)/g;
+  for (const match of content.matchAll(withOptions)) {
+    databases.push({
+      name: match[1],
+      migrations: stringProperty(match[2], "migrations"),
+    });
+  }
+  const seen = new Set(databases.map((database) => database.name));
+  for (const name of matches(content, /new\s+SQLDatabase\s*\(\s*["'`]([^"'`]+)["'`]/g)) {
+    if (!seen.has(name)) databases.push({ name });
+  }
+  return databases;
 }
 
 function sourceServices(backendDir, entries) {

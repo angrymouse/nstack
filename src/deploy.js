@@ -99,6 +99,7 @@ export async function deploy(options = {}) {
   const releaseFile = releaseManifestPath(cwd);
   ensureDir(path.dirname(infraFile));
   let infraText = renderEncoreInfra({ config, state, resources, infra, release, secretEnv });
+  let runtimeInfraText = renderEncoreInfra({ config, state, resources, infra, release, secretEnv, materializeSecrets: true });
   let artifacts = deploymentArtifacts({ config, release, infraText, localContext: localOnly });
   let images = artifacts.images;
   let ctx = { config, state, resources, infra, images, build: artifacts.build, release, secretEnv };
@@ -106,7 +107,7 @@ export async function deploy(options = {}) {
     resources,
     infra,
     secretEnv: buildOnlySecretEnv(resources, secretEnv),
-    buildEnv: composeBuildValues({ config, release, infraText }),
+    buildEnv: composeBuildValues({ config, release, infraText: runtimeInfraText }),
   });
   writeText(infraFile, infraText);
   writeText(composeFile, renderDokployCompose(ctx));
@@ -209,6 +210,7 @@ export async function deploy(options = {}) {
   }
 
   infraText = renderEncoreInfra({ config, state: nextState, resources, infra, release, secretEnv });
+  runtimeInfraText = renderEncoreInfra({ config, state: nextState, resources, infra, release, secretEnv, materializeSecrets: true });
   artifacts = deploymentArtifacts({ config, release, infraText, localContext: localOnly });
   images = artifacts.images;
   ctx = { config, state: nextState, resources, infra, images, build: artifacts.build, release, secretEnv };
@@ -223,7 +225,7 @@ export async function deploy(options = {}) {
       resources,
       infra,
       secretEnv,
-      buildEnv: composeBuildValues({ config, release, infraText, source: composeSource }),
+      buildEnv: composeBuildValues({ config, release, infraText: runtimeInfraText, source: composeSource }),
     }),
     { source: composeSource },
   );
@@ -807,6 +809,7 @@ async function completeDeployConfig(config, cwd, options) {
       : options.registry || config.deploy.registry || "";
     const repository = options.repository || config.deploy.source?.repository || inferGitRepository(cwd);
     const branch = options.branch || config.deploy.source?.branch || inferGitBranch(cwd);
+    const source = sourceConfigFromOptions(config.deploy.source || {}, options);
     const url = options.dokployUrl || config.deploy.provider.url || (localOnly ? "" : await prompter.ask("DOKPLOY_URL", "Dokploy URL"));
     const apiKey = options.dokployApiKey || config.deploy.provider.apiKey || (localOnly ? "" : await prompter.ask("DOKPLOY_API_KEY", "Dokploy API key", { secret: true }));
     const serverId = options.serverId || config.deploy.provider.serverId || process.env.DOKPLOY_SERVER_ID || "";
@@ -819,6 +822,17 @@ async function completeDeployConfig(config, cwd, options) {
       ...(registry ? { NSTACK_REGISTRY: registry } : {}),
       ...(repository ? { NSTACK_REPOSITORY: repository } : {}),
       ...(branch ? { NSTACK_BRANCH: branch } : {}),
+      ...(source.sourceType ? { NSTACK_SOURCE_TYPE: source.sourceType } : {}),
+      ...(source.githubId ? { NSTACK_GITHUB_ID: source.githubId } : {}),
+      ...(source.gitlabId ? { NSTACK_GITLAB_ID: source.gitlabId } : {}),
+      ...(source.bitbucketId ? { NSTACK_BITBUCKET_ID: source.bitbucketId } : {}),
+      ...(source.giteaId ? { NSTACK_GITEA_ID: source.giteaId } : {}),
+      ...(source.gitlabProjectId !== "" ? { NSTACK_GITLAB_PROJECT_ID: source.gitlabProjectId } : {}),
+      ...(source.gitlabPathNamespace ? { NSTACK_GITLAB_PATH_NAMESPACE: source.gitlabPathNamespace } : {}),
+      ...(source.bitbucketRepositorySlug ? { NSTACK_BITBUCKET_REPOSITORY_SLUG: source.bitbucketRepositorySlug } : {}),
+      ...(source.sshKeyId ? { NSTACK_GIT_SSH_KEY_ID: source.sshKeyId } : {}),
+      ...(source.composePath ? { NSTACK_COMPOSE_PATH: source.composePath } : {}),
+      ...(source.watchPaths.length ? { NSTACK_WATCH_PATHS: source.watchPaths.join(",") } : {}),
       ...(url ? { DOKPLOY_URL: url } : {}),
       ...(apiKey ? { DOKPLOY_API_KEY: apiKey } : {}),
       ...(serverId ? { DOKPLOY_SERVER_ID: serverId } : {}),
@@ -837,13 +851,43 @@ async function completeDeployConfig(config, cwd, options) {
         buildMode,
         platform,
         registry,
-        source: { ...config.deploy.source, repository, branch },
+        source: { ...config.deploy.source, ...source, repository, branch },
         provider: { ...config.deploy.provider, url, apiKey, serverId, projectName, environmentName },
       },
     };
   } finally {
     prompter.close();
   }
+}
+
+function sourceConfigFromOptions(existing, options) {
+  return {
+    sourceType: options.sourceType || existing.sourceType || "",
+    githubId: options.githubId || existing.githubId || "",
+    gitlabId: options.gitlabId || existing.gitlabId || "",
+    bitbucketId: options.bitbucketId || existing.bitbucketId || "",
+    giteaId: options.giteaId || existing.giteaId || "",
+    gitlabProjectId: optionNumber(options.gitlabProjectId, existing.gitlabProjectId),
+    gitlabPathNamespace: options.gitlabPathNamespace || existing.gitlabPathNamespace || "",
+    bitbucketRepositorySlug: options.bitbucketRepositorySlug || existing.bitbucketRepositorySlug || "",
+    sshKeyId: options.sshKeyId || existing.sshKeyId || "",
+    composePath: options.composePath || existing.composePath || "",
+    watchPaths: optionList(options.watchPaths, existing.watchPaths || []),
+  };
+}
+
+function optionNumber(optionValue, existingValue) {
+  const value = optionValue !== undefined && optionValue !== null && optionValue !== "" ? optionValue : existingValue;
+  if (value === undefined || value === null || value === "") return "";
+  const number = Number(value);
+  return Number.isFinite(number) ? number : "";
+}
+
+function optionList(optionValue, existingValue) {
+  if (optionValue !== undefined && optionValue !== null && optionValue !== "") {
+    return String(optionValue).split(",").map((item) => item.trim()).filter(Boolean);
+  }
+  return Array.isArray(existingValue) ? existingValue.filter(Boolean).map(String) : [];
 }
 
 function inferGitRepository(cwd) {

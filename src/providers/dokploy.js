@@ -2,7 +2,14 @@ import { formatDotEnv, idOf, parseDotEnv, slugify } from "../util.js";
 
 export const DOKPLOY_REDIS_IMAGE = "docker.dragonflydb.io/dragonflydb/dragonfly";
 export const DOKPLOY_REDIS_COMMAND = "dragonfly";
-export const DOKPLOY_REDIS_ARGS = ["--logtostderr", "--dir", "/data", "--dbfilename", "dump"];
+export const DOKPLOY_REDIS_ARGS = [
+  "--logtostderr",
+  "--dir",
+  "/data",
+  "--dbfilename",
+  "dump",
+  "--default_lua_flags=allow-undeclared-keys",
+];
 
 export class DokployClient {
   constructor({ url, apiKey }) {
