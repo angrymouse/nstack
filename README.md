@@ -59,10 +59,11 @@ For the detailed operator guide, see [USING_NSTACK.md](USING_NSTACK.md).
 - Dokploy native Postgres and Redis-compatible Dragonfly cache resources are
   created when Encore declares SQL databases or cache clusters.
 - Dokploy Compose builds and runs the backend/frontend services plus generated
-  support services such as NSQ for Pub/Sub and MinIO for Encore object storage
-  buckets.
+  support services such as NSQ for Pub/Sub and RustFS for Encore object storage
+  buckets. Public buckets add a small RustFS public-route adapter so Dokploy can
+  keep `/objects` on the app domain while backend S3 traffic stays internal.
 - Dokploy Domains/Traefik route `/` to Nuxt, `/api` to Encore, and `/objects`
-  to MinIO only when a public Encore bucket is declared.
+  to the RustFS public adapter only when a public Encore bucket is declared.
 - Dokploy Schedules run Encore cron jobs against the backend service.
 - Encore `secret()` values are stored as Dokploy Compose environment variables
   through `nstack env set`, `nstack env push`, and deploy.

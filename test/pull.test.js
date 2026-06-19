@@ -91,7 +91,7 @@ export const refresh = new CronJob("refresh", { every: "5m" });
   assert.equal(state.infra.postgres.password, "remote-postgres-password");
   assert.equal(state.infra.objectStorage.accessKey, "remote-minio-access");
   assert.equal(state.infra.objectStorage.secretKey, "remote-minio-secret");
-  assert.equal(state.infra.objectStorage.endpoint, "http://pull-app-minio:9000");
+  assert.equal(state.infra.objectStorage.endpoint, "http://pull-app-rustfs:9000");
   assert.match(secrets, /API_SECRET=remote-api-secret/);
   assert.doesNotMatch(secrets, /UNDECLARED_SECRET/);
   assert.doesNotMatch(secrets, /NSTACK_MINIO/);

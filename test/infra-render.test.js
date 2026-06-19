@@ -69,7 +69,7 @@ test("infra renderer maps Encore caches, buckets, and secrets to Dokploy-backed 
     infra: {
       redis: { host: "demo-redis:6379" },
       objectStorage: {
-        endpoint: "http://demo-minio:9000",
+        endpoint: "http://demo-rustfs:9000",
         region: "us-east-1",
       },
     },
@@ -87,7 +87,7 @@ test("infra renderer maps Encore caches, buckets, and secrets to Dokploy-backed 
   assert.equal(infra.object_storage[0].type, "s3");
   assert.deepEqual(infra.object_storage[0].access_key_id, { $env: "NSTACK_MINIO_ACCESS_KEY" });
   assert.deepEqual(infra.object_storage[0].secret_access_key, { $env: "NSTACK_MINIO_SECRET_KEY" });
-  assert.equal(infra.object_storage[0].endpoint, "http://demo-minio:9000");
+  assert.equal(infra.object_storage[0].endpoint, "http://demo-rustfs:9000");
   assert.equal(infra.object_storage[0].buckets.uploads.name, "demo-uploads");
   assert.equal(infra.object_storage[0].buckets["public-assets"].public_base_url, "https://demo.example.test/objects/demo-public-assets");
 });
@@ -120,7 +120,7 @@ test("infra renderer can materialize infrastructure secrets for Encore runtime c
         password: "redis-secret",
       },
       objectStorage: {
-        endpoint: "http://demo-minio:9000",
+        endpoint: "http://demo-rustfs:9000",
         region: "us-east-1",
         accessKey: "minio-access",
         secretKey: "minio-secret",

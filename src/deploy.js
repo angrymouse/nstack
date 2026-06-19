@@ -15,7 +15,19 @@ import {
 } from "./config.js";
 import { createDoctorReport, inspectResources, preflightError, preflightFailures } from "./doctor.js";
 import { normalizeTargetPlatform } from "./platform.js";
-import { DokployProvider, existingInfraSecretError, sourceRefLabelForConfig } from "./providers/dokploy.js";
+import {
+  DokployClient,
+  DokployProvider,
+  existingInfraSecretError,
+  resolveComposeSourceConfig,
+  sourceRefLabelForConfig,
+} from "./providers/dokploy.js";
+import {
+  OBJECT_STORAGE_ACCESS_ENV,
+  OBJECT_STORAGE_SECRET_ENV,
+  objectStorageInfra,
+  objectStorageServiceHost,
+} from "./object-storage.js";
 import { renderDokployCompose } from "./render/compose.js";
 import { renderEncoreInfra } from "./render/infra.js";
 import { Prompter } from "./prompt.js";
@@ -166,8 +178,8 @@ export async function deploy(options = {}) {
     const existingComposeId = nextState.dokploy.composeId || await provider.findComposeId(environmentId);
     if (existingComposeId && generatedInfraSecrets.objectStorage) {
       const remoteEnv = await provider.readComposeEnvironment(existingComposeId);
-      if (remoteEnv.NSTACK_MINIO_ACCESS_KEY || remoteEnv.NSTACK_MINIO_SECRET_KEY) {
-        throw existingInfraSecretError("object storage service", `${config.app.slug}-minio`, "NSTACK_MINIO_SECRET_KEY");
+      if (remoteEnv[OBJECT_STORAGE_ACCESS_ENV] || remoteEnv[OBJECT_STORAGE_SECRET_ENV]) {
+        throw existingInfraSecretError("object storage service", objectStorageServiceHost(config), OBJECT_STORAGE_SECRET_ENV);
       }
     }
     if (generatedInfraSecrets.objectStorage) {
@@ -268,7 +280,6 @@ export async function deploy(options = {}) {
     }
 
     await runReleaseChecks(cwd, config, release, options);
-    await timedAsync("dokploy: clean unused images", true, timings, () => provider.cleanUnusedImages());
   } catch (error) {
     nextState.lastAttempt = releaseAttempt(release, {
       status: "failed",
@@ -311,11 +322,6 @@ export async function waitForDeployment(options = {}) {
   const release = releaseFromState(state);
 
   await runReleaseChecks(cwd, config, release, options);
-  if (config.deploy.provider.url && config.deploy.provider.apiKey) {
-    const provider = new DokployProvider({ config, state });
-    await provider.cleanUnusedImages();
-  }
-
   const nextState = {
     ...state,
     dokploy: { ...(state.dokploy || {}) },
@@ -362,7 +368,6 @@ export async function redeploy(options = {}) {
 
   try {
     await runReleaseChecks(cwd, config, release, options);
-    await provider.cleanUnusedImages();
     finalizeReleaseState(nextState, release, options, {
       triggeredAt: nextState.lastAttempt.triggeredAt,
     });
@@ -771,7 +776,7 @@ function infraFromStateForEnvPush({ config, resources, state }) {
     throw new Error("Missing local infrastructure state for NSTACK_REDIS_PASSWORD. Run `nstack pull` before `nstack env push`.");
   }
   if (resources.buckets.length > 0 && (!infra.objectStorage?.accessKey || !infra.objectStorage?.secretKey)) {
-    throw new Error("Missing local infrastructure state for NSTACK_MINIO_SECRET_KEY. Run `nstack pull` before `nstack env push`.");
+    throw new Error(`Missing local infrastructure state for ${OBJECT_STORAGE_SECRET_ENV}. Run \`nstack pull\` before \`nstack env push\`.`);
   }
   return {
     postgres: {
@@ -786,14 +791,7 @@ function infraFromStateForEnvPush({ config, resources, state }) {
       host: infra.redis?.host || `${config.app.slug}-redis:6379`,
       password: infra.redis?.password || "",
     },
-    objectStorage: {
-      appName: infra.objectStorage?.appName || `${config.app.slug}-minio`,
-      host: infra.objectStorage?.host || `${config.app.slug}-minio:9000`,
-      endpoint: infra.objectStorage?.endpoint || `http://${config.app.slug}-minio:9000`,
-      region: infra.objectStorage?.region || "us-east-1",
-      accessKey: infra.objectStorage?.accessKey || "",
-      secretKey: infra.objectStorage?.secretKey || "",
-    },
+    objectStorage: objectStorageInfra(config, infra.objectStorage),
   };
 }
 
@@ -809,13 +807,21 @@ async function completeDeployConfig(config, cwd, options) {
       : options.registry || config.deploy.registry || "";
     const repository = options.repository || config.deploy.source?.repository || inferGitRepository(cwd);
     const branch = options.branch || config.deploy.source?.branch || inferGitBranch(cwd);
-    const source = sourceConfigFromOptions(config.deploy.source || {}, options);
     const url = options.dokployUrl || config.deploy.provider.url || (localOnly ? "" : await prompter.ask("DOKPLOY_URL", "Dokploy URL"));
     const apiKey = options.dokployApiKey || config.deploy.provider.apiKey || (localOnly ? "" : await prompter.ask("DOKPLOY_API_KEY", "Dokploy API key", { secret: true }));
     const serverId = options.serverId || config.deploy.provider.serverId || process.env.DOKPLOY_SERVER_ID || "";
     const platform = normalizeTargetPlatform(options.platform || config.deploy.platform).value;
     const projectName = options.project || config.deploy.provider.projectName;
     const environmentName = options.environment || config.deploy.provider.environmentName;
+    const source = await completeSourceConfig({
+      buildMode,
+      localOnly,
+      source: sourceConfigFromOptions(config.deploy.source || {}, options),
+      repository,
+      branch,
+      url,
+      apiKey,
+    });
     const values = {
       NSTACK_DOMAIN: domain,
       NSTACK_BUILD_MODE: buildMode,
@@ -874,6 +880,49 @@ function sourceConfigFromOptions(existing, options) {
     composePath: options.composePath || existing.composePath || "",
     watchPaths: optionList(options.watchPaths, existing.watchPaths || []),
   };
+}
+
+async function completeSourceConfig({ buildMode, localOnly, source, repository, branch, url, apiKey }) {
+  const base = { ...source, repository, branch };
+  if (sourceConfigIsComplete(base)) return sourceDefaultsFromResolved(base, resolveComposeSourceConfig(base, []));
+  if (buildMode !== "compose" || localOnly || !repository || !branch || !url || !apiKey) return source;
+
+  const client = new DokployClient({ url, apiKey });
+  const providers = asList(await client.trpcGet("gitProvider.getAll"));
+  const resolved = resolveComposeSourceConfig(base, providers);
+  return sourceDefaultsFromResolved(source, resolved);
+}
+
+function sourceConfigIsComplete(source) {
+  if (source.sourceType === "raw") return true;
+  if (source.sourceType === "git") return Boolean(source.repository && source.branch);
+  return ["github", "gitlab", "bitbucket", "gitea"]
+    .some((type) => source.sourceType === type && Boolean(source[`${type}Id`]));
+}
+
+function sourceDefaultsFromResolved(source, resolved) {
+  if (!resolved) return source;
+  return {
+    ...source,
+    sourceType: source.sourceType || resolved.sourceType,
+    githubId: source.githubId || resolved.githubId || "",
+    gitlabId: source.gitlabId || resolved.gitlabId || "",
+    bitbucketId: source.bitbucketId || resolved.bitbucketId || "",
+    giteaId: source.giteaId || resolved.giteaId || "",
+    gitlabProjectId: source.gitlabProjectId || resolved.gitlabProjectId || "",
+    gitlabPathNamespace: source.gitlabPathNamespace || resolved.gitlabPathNamespace || "",
+    bitbucketRepositorySlug: source.bitbucketRepositorySlug || resolved.bitbucketRepositorySlug || "",
+    sshKeyId: source.sshKeyId || resolved.sshKeyId || "",
+    composePath: source.composePath || resolved.composePath || "",
+    watchPaths: source.watchPaths.length ? source.watchPaths : resolved.watchPaths || [],
+  };
+}
+
+function asList(value) {
+  if (Array.isArray(value)) return value;
+  if (Array.isArray(value?.data)) return value.data;
+  if (Array.isArray(value?.items)) return value.items;
+  return [];
 }
 
 function optionNumber(optionValue, existingValue) {
@@ -1224,7 +1273,6 @@ function ensureInfraSecrets({ config, resources, state }) {
   const existing = state.infra || {};
   const postgresName = `${config.app.slug}-postgres`;
   const redisName = `${config.app.slug}-redis`;
-  const minioName = `${config.app.slug}-minio`;
   return {
     postgres: {
       appName: postgresName,
@@ -1238,14 +1286,10 @@ function ensureInfraSecrets({ config, resources, state }) {
       host: existing.redis?.host || `${redisName}:6379`,
       password: existing.redis?.password || (resources.caches.length ? randomSecret(24) : ""),
     },
-    objectStorage: {
-      appName: minioName,
-      host: existing.objectStorage?.host || `${minioName}:9000`,
-      endpoint: existing.objectStorage?.endpoint || `http://${minioName}:9000`,
-      region: existing.objectStorage?.region || "us-east-1",
+    objectStorage: objectStorageInfra(config, existing.objectStorage, {
       accessKey: existing.objectStorage?.accessKey || (resources.buckets.length ? randomSecret(16) : ""),
       secretKey: existing.objectStorage?.secretKey || (resources.buckets.length ? randomSecret(32) : ""),
-    },
+    }),
   };
 }
 

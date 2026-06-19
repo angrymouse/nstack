@@ -1,4 +1,5 @@
 import { formatDotEnv, idOf, parseDotEnv, slugify } from "../util.js";
+import { OBJECT_STORAGE_PUBLIC_SERVICE_NAME } from "../object-storage.js";
 
 export const DOKPLOY_REDIS_IMAGE = "docker.dragonflydb.io/dragonflydb/dragonfly";
 export const DOKPLOY_REDIS_COMMAND = "dragonfly";
@@ -231,34 +232,8 @@ export class DokployProvider {
 
   async resolveComposeSource() {
     const sourceConfig = this.config.deploy.source || {};
-    const repository = sourceConfig.repository || "";
-    const branch = sourceConfig.branch || "";
-    const parsed = parseGitRepository(repository);
-    if (!parsed || !branch) return null;
-
     const providers = asList(await this.client.trpcGet("gitProvider.getAll"));
-    const sourceType = resolveSourceType(sourceConfig, parsed, providers);
-    if (!sourceType) return null;
-    if (sourceType === "git") return plainGitSource(sourceConfig, parsed, branch);
-
-    const match = providers.find((provider) => providerMatchesSource(provider, sourceType, parsed, sourceConfig));
-    const providerId = configuredProviderId(sourceConfig, sourceType) || providerSpecificId(match, sourceType);
-    if (!providerId) return null;
-
-    return {
-      sourceType,
-      [`${sourceType}Id`]: providerId,
-      owner: parsed.owner,
-      repository: parsed.repository,
-      branch,
-      pathNamespace: parsed.pathNamespace,
-      gitlabProjectId: sourceConfig.gitlabProjectId || "",
-      gitlabPathNamespace: sourceConfig.gitlabPathNamespace || parsed.pathNamespace,
-      bitbucketRepositorySlug: sourceConfig.bitbucketRepositorySlug || parsed.repository,
-      composePath: sourceConfig.composePath || "deploy/nstack/compose.dokploy.yaml",
-      watchPaths: sourceConfig.watchPaths || [],
-      refLabel: sourceRefLabelForConfig(sourceConfig),
-    };
+    return resolveComposeSourceConfig(sourceConfig, providers);
   }
 
   async saveComposeEnvironment(composeId, env = "") {
@@ -282,8 +257,17 @@ export class DokployProvider {
 
   async ensureDomains(composeId, resources = {}) {
     const domains = asList(await this.client.apiGet("domain.byComposeId", { composeId }));
-    for (const domain of expectedComposeDomains(this.config, composeId, resources)) {
-      await this.upsertDomain(domains, domain);
+    const expected = expectedComposeDomains(this.config, composeId, resources);
+    const deleted = new Set();
+    for (const domain of staleManagedDomains(this.config, domains, expected)) {
+      const domainId = idOf(domain, ["domainId", "id"]);
+      if (!domainId) continue;
+      await this.client.apiPost("domain.delete", { domainId });
+      deleted.add(domainId);
+    }
+    const remaining = domains.filter((domain) => !deleted.has(idOf(domain, ["domainId", "id"])));
+    for (const domain of expected) {
+      await this.upsertDomain(remaining, domain);
     }
   }
 
@@ -625,6 +609,20 @@ function composeSourcePayload(source = null) {
   return {};
 }
 
+function staleManagedDomains(config, domains, expected) {
+  const managedPaths = new Set(expectedComposeDomains(config, "", {
+    buckets: [{ name: "public-bucket", public: true }],
+  }).map((domain) => domain.path));
+  return domains.filter((domain) => {
+    if (domain.host !== config.app.domain) return false;
+    if (!managedPaths.has(String(domain.path || "/"))) return false;
+    return !expected.some((wanted) =>
+      wanted.host === domain.host &&
+      wanted.path === String(domain.path || "/") &&
+      wanted.serviceName === domain.serviceName);
+  });
+}
+
 export async function ensureGiteaComposeWebhook({ dokployUrl, compose, source }) {
   const refreshToken = compose?.refreshToken || "";
   const gitea = compose?.gitea || {};
@@ -679,6 +677,36 @@ async function giteaRequest(apiBase, token, path, { method = "GET", body = null 
 
 function giteaHookUrl(hook) {
   return hook?.config?.url || hook?.url || "";
+}
+
+export function resolveComposeSourceConfig(sourceConfig = {}, providers = []) {
+  const repository = sourceConfig.repository || "";
+  const branch = sourceConfig.branch || "";
+  const parsed = parseGitRepository(repository);
+  if (!parsed || !branch) return null;
+
+  const sourceType = resolveSourceType(sourceConfig, parsed, providers);
+  if (!sourceType || sourceType === "raw") return null;
+  if (sourceType === "git") return plainGitSource(sourceConfig, parsed, branch);
+
+  const match = providers.find((provider) => providerMatchesSource(provider, sourceType, parsed, sourceConfig));
+  const providerId = configuredProviderId(sourceConfig, sourceType) || providerSpecificId(match, sourceType);
+  if (!providerId) return null;
+
+  return {
+    sourceType,
+    [`${sourceType}Id`]: providerId,
+    owner: parsed.owner,
+    repository: parsed.repository,
+    branch,
+    pathNamespace: parsed.pathNamespace,
+    gitlabProjectId: sourceConfig.gitlabProjectId || "",
+    gitlabPathNamespace: sourceConfig.gitlabPathNamespace || parsed.pathNamespace,
+    bitbucketRepositorySlug: sourceConfig.bitbucketRepositorySlug || parsed.repository,
+    composePath: sourceConfig.composePath || "deploy/nstack/compose.dokploy.yaml",
+    watchPaths: sourceConfig.watchPaths || [],
+    refLabel: sourceRefLabelForConfig(sourceConfig),
+  };
 }
 
 function resolveSourceType(sourceConfig, parsed, providers) {
@@ -821,7 +849,7 @@ export function expectedComposeDomains(config, composeId = "", resources = {}) {
   if ((resources.buckets || []).some((bucket) => bucket.public)) {
     domains.push({
       composeId,
-      serviceName: "minio",
+      serviceName: OBJECT_STORAGE_PUBLIC_SERVICE_NAME,
       host: config.app.domain,
       path: "/objects",
       port: 9000,

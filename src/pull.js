@@ -8,6 +8,7 @@ import {
 } from "./config.js";
 import { inspectResources } from "./doctor.js";
 import { DokployProvider } from "./providers/dokploy.js";
+import { objectStorageInfra } from "./object-storage.js";
 import { formatDotEnv, parseDotEnv, readText, writeText, ensureDir } from "./util.js";
 
 export async function pull(options = {}) {
@@ -102,14 +103,10 @@ function mergePulledInfra({ config, resources, current, env, force }) {
     };
   }
   if (resources.buckets.length > 0) {
-    next.objectStorage = {
-      appName: current.objectStorage?.appName || `${config.app.slug}-minio`,
-      host: current.objectStorage?.host || `${config.app.slug}-minio:9000`,
-      endpoint: current.objectStorage?.endpoint || `http://${config.app.slug}-minio:9000`,
-      region: current.objectStorage?.region || "us-east-1",
+    next.objectStorage = objectStorageInfra(config, current.objectStorage, {
       accessKey: chooseValue(current.objectStorage?.accessKey, env.NSTACK_MINIO_ACCESS_KEY, force),
       secretKey: chooseValue(current.objectStorage?.secretKey, env.NSTACK_MINIO_SECRET_KEY, force),
-    };
+    });
   }
   return next;
 }

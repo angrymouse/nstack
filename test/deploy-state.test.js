@@ -589,7 +589,7 @@ export const uploads = new Bucket("uploads", {});
   assert.match(state.infra.postgres.password, /^[A-Za-z0-9_-]+$/);
   assert.match(state.infra.objectStorage.accessKey, /^[A-Za-z0-9_-]+$/);
   assert.match(state.infra.objectStorage.secretKey, /^[A-Za-z0-9_-]+$/);
-  assert.equal(state.infra.objectStorage.endpoint, "http://state-test-minio:9000");
+  assert.equal(state.infra.objectStorage.endpoint, "http://state-test-rustfs:9000");
   assert.equal(state.lastRelease, undefined);
   assert.ok(calls.includes("domain.byComposeId"));
 });
@@ -806,7 +806,7 @@ export const uploads = new Bucket("uploads", {});
   assert.match(state.infra.objectStorage.secretKey, /^[A-Za-z0-9_-]+$/);
   assert.match(savedEnv, /NSTACK_MINIO_ACCESS_KEY=/);
   assert.match(savedEnv, /NSTACK_MINIO_SECRET_KEY=/);
-  assert.match(updatedCompose, /minio\/minio:latest/);
+  assert.match(updatedCompose, /rustfs\/rustfs:latest/);
 });
 
 test("render preflight reports missing backend without raw filesystem errors", async () => {
@@ -1179,9 +1179,11 @@ export const apiSecret = secret("API_SECRET");
   const originalFetch = globalThis.fetch;
   const originalLog = console.log;
   const output = [];
+  const calls = [];
   globalThis.fetch = async (url, init = {}) => {
     const parsed = new URL(String(url));
     const endpoint = parsed.pathname.replace(/^\/api\/(?:trpc\/)?/, "");
+    calls.push(endpoint);
     if (init.method === "GET" && (endpoint === "project.all" || endpoint === "environment.byProjectId" || endpoint === "compose.search" || endpoint === "domain.byComposeId" || endpoint === "schedule.list")) {
       return Response.json({ json: [] });
     }
@@ -1222,6 +1224,8 @@ export const apiSecret = secret("API_SECRET");
   assert.equal(report.state.lastAttempt.checks.public, "passed");
   assert.equal(report.state.lastAttempt.checks.dokploy, "skipped");
   assert.deepEqual(report.resources.secrets, ["API_SECRET"]);
+  assert.equal(calls.includes("settings.updateDockerCleanup"), true);
+  assert.equal(calls.includes("settings.cleanUnusedImages"), false);
   assert.doesNotMatch(json, /json-secret-value|Deployed deploy-json|Post-deploy status/);
 });
 

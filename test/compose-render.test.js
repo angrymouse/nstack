@@ -75,7 +75,7 @@ test("compose renderer keeps source build values in Dokploy env placeholders", (
   assert.doesNotMatch(output, /abc123/);
 });
 
-test("compose renderer provisions MinIO for Encore object storage buckets", () => {
+test("compose renderer provisions RustFS for Encore object storage buckets", () => {
   const output = renderDokployCompose({
     config: {
       app: { slug: "bucket-app", domain: "bucket.example.test" },
@@ -96,20 +96,23 @@ test("compose renderer provisions MinIO for Encore object storage buckets", () =
     release: { commit: "abc123", tag: "tag" },
   });
 
-  assert.match(output, /minio:\n\s+image: "minio\/minio:latest"/);
-  assert.match(output, /MINIO_ROOT_USER: "\$\{NSTACK_MINIO_ACCESS_KEY:\?set NSTACK_MINIO_ACCESS_KEY\}"/);
-  assert.match(output, /MINIO_ROOT_PASSWORD: "\$\{NSTACK_MINIO_SECRET_KEY:\?set NSTACK_MINIO_SECRET_KEY\}"/);
-  assert.match(output, /MINIO_DOMAIN: "bucket-app-minio"/);
-  assert.match(output, /aliases:\n\s+- "bucket-app-minio"/);
-  assert.match(output, /- "bucket-app-uploads\.bucket-app-minio"/);
-  assert.match(output, /- "bucket-app-public-assets\.bucket-app-minio"/);
-  assert.match(output, /minio-init:\n\s+image: "minio\/mc:latest"/);
+  assert.match(output, /rustfs:\n\s+image: "rustfs\/rustfs:latest"/);
+  assert.match(output, /RUSTFS_ACCESS_KEY: "\$\{NSTACK_MINIO_ACCESS_KEY:\?set NSTACK_MINIO_ACCESS_KEY\}"/);
+  assert.match(output, /RUSTFS_SECRET_KEY: "\$\{NSTACK_MINIO_SECRET_KEY:\?set NSTACK_MINIO_SECRET_KEY\}"/);
+  assert.match(output, /RUSTFS_SERVER_DOMAINS: "bucket-app-rustfs:9000"/);
+  assert.match(output, /aliases:\n\s+- "bucket-app-rustfs"/);
+  assert.match(output, /- "bucket-app-uploads\.bucket-app-rustfs"/);
+  assert.match(output, /- "bucket-app-public-assets\.bucket-app-rustfs"/);
+  assert.match(output, /rustfs-init:\n\s+image: "minio\/mc:latest"/);
+  assert.match(output, /rustfs-public:\n\s+image: "nginx:1\.27-alpine"/);
+  assert.match(output, /proxy_set_header Host bucket-app-rustfs:9000/);
+  assert.match(output, /proxy_pass http:\/\/bucket-app-rustfs:9000/);
   assert.match(output, /entrypoint:\n\s+- "\/bin\/sh"/);
   assert.match(output, /command:\n\s+- "-c"\n\s+- "until mc alias set local/);
   assert.match(output, /mc mb --ignore-existing local\/bucket-app-uploads/);
   assert.match(output, /mc anonymous set download local\/bucket-app-public-assets/);
-  assert.match(output, /backend:[\s\S]*depends_on:[\s\S]*minio:[\s\S]*condition: "service_started"/);
-  assert.match(output, /minio_data: \{\}/);
+  assert.match(output, /backend:[\s\S]*depends_on:[\s\S]*rustfs-init:[\s\S]*condition: "service_completed_successfully"/);
+  assert.match(output, /rustfs_data: \{\}/);
 });
 
 test("compose renderer runs Encore database migrations with the pinned go-migrate image", () => {

@@ -197,6 +197,61 @@ test("configure persists provider-specific source settings non-interactively", a
   assert.match(localEnv, /NSTACK_WATCH_PATHS="backend\/\*\*,frontend\/\*\*,deploy\/nstack\/\*\*"/);
 });
 
+test("configure infers provider-backed source settings from Dokploy", async () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "nstack-configure-infer-source-"));
+  const target = path.join(cwd, "app");
+
+  await runCli(["init", target, "--yes"]);
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  const previousCwd = process.cwd();
+  globalThis.fetch = async (url) => {
+    const parsed = new URL(String(url));
+    calls.push(parsed.pathname);
+    assert.equal(parsed.pathname, "/api/trpc/gitProvider.getAll");
+    return Response.json({
+      json: [
+        {
+          providerType: "gitea",
+          gitea: {
+            giteaId: "gitea-1",
+            giteaUrl: "https://git.example.test",
+          },
+        },
+      ],
+    });
+  };
+
+  process.chdir(target);
+  try {
+    await runCli([
+      "configure",
+      "--yes",
+      "--domain",
+      "demo.example.test",
+      "--dokploy-url",
+      "https://dokploy.example.test",
+      "--dokploy-api-key",
+      "secret-token",
+      "--repository",
+      "git@git.example.test:acme/demo.git",
+      "--branch",
+      "main",
+    ]);
+  } finally {
+    process.chdir(previousCwd);
+    globalThis.fetch = originalFetch;
+  }
+
+  const localEnv = readFileSync(path.join(target, ".nstack", "local.env"), "utf8");
+  assert.deepEqual(calls, ["/api/trpc/gitProvider.getAll"]);
+  assert.match(localEnv, /NSTACK_REPOSITORY=git@git\.example\.test:acme\/demo\.git/);
+  assert.match(localEnv, /NSTACK_BRANCH=main/);
+  assert.match(localEnv, /NSTACK_SOURCE_TYPE=gitea/);
+  assert.match(localEnv, /NSTACK_GITEA_ID=gitea-1/);
+  assert.match(localEnv, /NSTACK_COMPOSE_PATH=deploy\/nstack\/compose\.dokploy\.yaml/);
+});
+
 test("init skips deploy wizard when stdin is not interactive", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "nstack-init-nontty-"));
   const target = path.join(cwd, "app");

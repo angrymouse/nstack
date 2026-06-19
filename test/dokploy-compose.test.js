@@ -105,7 +105,7 @@ test("ensureRedis creates a Dokploy-native Dragonfly cache resource", async () =
   assert.deepEqual(deploy.body, { redisId: "redis-1" });
 });
 
-test("expected Compose domains include MinIO route only for public buckets", () => {
+test("expected Compose domains include object storage route only for public buckets", () => {
   const config = { app: { domain: "bucket.example.test" } };
   assert.deepEqual(
     expectedComposeDomains(config, "compose-1", { buckets: [{ name: "private" }] }).map((domain) => domain.path),
@@ -113,8 +113,49 @@ test("expected Compose domains include MinIO route only for public buckets", () 
   );
   assert.deepEqual(
     expectedComposeDomains(config, "compose-1", { buckets: [{ name: "public-assets", public: true }] }).map((domain) => `${domain.path}:${domain.serviceName}:${domain.port}:${domain.stripPath}`),
-    ["/:frontend:3000:false", "/api:backend:8080:true", "/objects:minio:9000:true"],
+    ["/:frontend:3000:false", "/api:backend:8080:true", "/objects:rustfs-public:9000:true"],
   );
+});
+
+test("ensureDomains prunes stale managed routes before adding replacements", async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    const parsed = new URL(String(url));
+    const body = init.body ? JSON.parse(init.body) : null;
+    calls.push({ method: init.method || "GET", path: parsed.pathname, body });
+    if ((init.method || "GET") === "GET" && parsed.pathname === "/api/domain.byComposeId") {
+      return Response.json({
+        json: [
+          { domainId: "domain-home", host: "bucket.example.test", path: "/", serviceName: "frontend", port: 3000, stripPath: false },
+          { domainId: "domain-api", host: "bucket.example.test", path: "/api", serviceName: "backend", port: 8080, stripPath: true },
+          { domainId: "domain-old-objects", host: "bucket.example.test", path: "/objects", serviceName: "rustfs", port: 9000, stripPath: true },
+          { domainId: "domain-custom", host: "custom.example.test", path: "/objects", serviceName: "minio", port: 9000, stripPath: true },
+        ],
+      });
+    }
+    return Response.json({ json: body?.domainId ? {} : { domainId: "created-domain" } });
+  };
+
+  try {
+    const provider = new DokployProvider({
+      config: {
+        app: { slug: "bucket-app", domain: "bucket.example.test" },
+        deploy: { provider: { url: "https://dokploy.example.test", apiKey: "dummy" } },
+      },
+      state: { dokploy: {} },
+    });
+    await provider.ensureDomains("compose-1", { buckets: [{ name: "public-assets", public: true }] });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  const deletes = calls.filter((call) => call.path === "/api/domain.delete");
+  assert.deepEqual(deletes.map((call) => call.body.domainId), ["domain-old-objects"]);
+  const creates = calls.filter((call) => call.path === "/api/domain.create");
+  assert.equal(creates.length, 1);
+  assert.equal(creates[0].body.path, "/objects");
+  assert.equal(creates[0].body.serviceName, "rustfs-public");
 });
 
 test("upsertCompose falls back to compose.update when saveEnvironment is unavailable", async () => {
