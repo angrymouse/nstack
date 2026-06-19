@@ -61,6 +61,7 @@ function buildReport({ cwd, config, state, resources, remote }) {
     ...Object.keys(secretsEnv),
     ...resources.secrets.filter((name) => Boolean(process.env[name])),
   ]);
+  const exposedCronEndpoints = exposedCrons(resources);
   const report = {
     app: {
       name: config.app.name,
@@ -111,6 +112,7 @@ function buildReport({ cwd, config, state, resources, remote }) {
       caches: resources.caches.map((cache) => cache.name).sort(),
       topics: resources.topics.map((topic) => topic.name).sort(),
       crons: resources.crons.map((cron) => cron.name).sort(),
+      exposedCrons: exposedCronEndpoints,
       buckets: resources.buckets.map((bucket) => bucket.name).sort(),
     },
     tools: {
@@ -245,6 +247,7 @@ function printReport(report) {
   line("caches", report.resources.caches.length ? report.resources.caches.join(", ") : null, "  ");
   line("topics", report.resources.topics.length ? report.resources.topics.join(", ") : null, "  ");
   line("crons", report.resources.crons.length ? report.resources.crons.join(", ") : null, "  ");
+  line("public cron endpoints", report.resources.exposedCrons.length ? report.resources.exposedCrons.join(", ") : null, "  ");
   line("buckets", report.resources.buckets.length ? report.resources.buckets.join(", ") : null, "  ");
   if (report.resources.metadataError) line("metadata error", report.resources.metadataError, "  ");
   console.log("");
@@ -303,6 +306,7 @@ function buildChecks(report) {
     check("docker", report.tools.docker.ok, "Install Docker and make sure it is available on PATH."),
     check("app-secrets", report.secrets.missing.length === 0, `Set missing app runtime secrets: ${report.secrets.missing.join(", ")}`),
     check("resource-discovery", report.resources.source !== "error", "Fix Encore resource discovery before deploying."),
+    check("cron-endpoints-private", report.resources.exposedCrons.length === 0, `Make Encore cron endpoints private with api({ expose: false }, ...): ${report.resources.exposedCrons.join(", ")}`),
   ];
 }
 
@@ -328,7 +332,7 @@ export function preflightError(command, failures) {
 
 function checkNamesFor(mode, options = {}) {
   const buildMode = options.buildMode || "registry";
-  if (mode === "render") return ["config", "domain", "backend", "resource-discovery"];
+  if (mode === "render") return ["config", "domain", "backend", "resource-discovery", "cron-endpoints-private"];
   if (mode === "build") {
     const names = [
       "config",
@@ -340,6 +344,7 @@ function checkNamesFor(mode, options = {}) {
       "node",
       "docker",
       "resource-discovery",
+      "cron-endpoints-private",
     ];
     if (buildMode === "registry") names.splice(2, 0, "registry");
     if (buildMode === "registry") names.push("encore", "backend-build");
@@ -356,6 +361,7 @@ function checkNamesFor(mode, options = {}) {
     "node",
     "app-secrets",
     "resource-discovery",
+    "cron-endpoints-private",
   ];
   if (buildMode === "registry") names.splice(2, 0, "registry");
   if (buildMode === "compose") names.splice(2, 0, "source-repository", "frontend", "backend-dockerfile", "frontend-dockerfile");
@@ -382,4 +388,14 @@ function check(name, ok, fix) {
 function checksOk(checks, names) {
   const byName = new Map(checks.map((check) => [check.name, check.ok]));
   return names.every((name) => byName.get(name));
+}
+
+function exposedCrons(resources) {
+  return (resources.crons || [])
+    .filter((cron) => cron.endpoint?.exposed === true)
+    .map((cron) => {
+      const endpoint = cron.endpoint || {};
+      return `${cron.name} (${endpoint.service || "unknown"}.${endpoint.name || "unknown"})`;
+    })
+    .sort();
 }

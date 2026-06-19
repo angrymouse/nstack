@@ -1,5 +1,6 @@
 import { formatDotEnv, idOf, parseDotEnv, slugify } from "../util.js";
 import { OBJECT_STORAGE_PUBLIC_SERVICE_NAME } from "../object-storage.js";
+import { CRON_RUNNER_BUNDLE_PATH } from "../cron-runner.js";
 
 export const DOKPLOY_REDIS_IMAGE = "docker.dragonflydb.io/dragonflydb/dragonfly";
 export const DOKPLOY_REDIS_COMMAND = "dragonfly";
@@ -986,29 +987,15 @@ function extractComposeImages(composeFile) {
 }
 
 function schedulePayload(config, composeId, cron) {
-  const endpoint = cron.endpoint || {};
-  const routePath = endpoint.path || `/${endpoint.service || "cron"}.${endpoint.name || cron.name}`;
-  const method = endpoint.method || "POST";
-  const script = `const response = await fetch(${JSON.stringify(`http://127.0.0.1:8080${routePath}`)}, {
-  method: ${JSON.stringify(method)},
-  headers: {
-    "X-Encore-Cron-Trigger": "scheduled",
-    "X-Encore-Cron-Execution": ${JSON.stringify(cron.name)} + "-" + Date.now(),
-  },
-});
-if (!response.ok) {
-  console.error(${JSON.stringify(`cron ${cron.name} failed: HTTP `)} + response.status);
-  process.exit(1);
-}`;
   return {
     name: scheduleName(config, cron),
-    description: `Managed by nstack from Encore cron ${cron.name}`,
+    description: `Managed by nstack from private Encore cron ${cron.name}`,
     cronExpression: cronExpressionForEncoreCron(cron),
     appName: config.app.slug,
     serviceName: "backend",
     shellType: "sh",
     scheduleType: "compose",
-    command: `node --input-type=module -e ${shellQuote(script)}`,
+    command: `NODE_ENV=production node ${CRON_RUNNER_BUNDLE_PATH} ${shellQuote(cron.name)}`,
     script: null,
     composeId,
     enabled: true,

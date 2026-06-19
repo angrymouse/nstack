@@ -40,6 +40,7 @@ RUN --mount=type=cache,id=nstack-backend-pnpm,target=/pnpm/store \
   && pnpm install --filter ./backend... --prefer-offline --ignore-scripts --frozen-lockfile=false
 
 COPY backend ./backend
+COPY scripts/nstack-cron-runner.mjs ./scripts/nstack-cron-runner.mjs
 
 ARG ENCORE_INFRA_CONFIG_B64
 RUN mkdir -p /encore \
@@ -47,7 +48,14 @@ RUN mkdir -p /encore \
 
 WORKDIR /workspace/backend
 RUN encore gen wrappers
+RUN mkdir -p .encore/nstack/cron-runner \
+  && encore debug meta -f json > .encore/nstack/meta.json \
+  && node ../scripts/nstack-cron-runner.mjs .encore/nstack/meta.json encore.gen/internal/entrypoints/combined/main.ts encore.gen/internal/entrypoints/combined/nstack-cron-runner.ts \
+  && if [ -f encore.gen/internal/entrypoints/combined/nstack-cron-runner.ts ]; then \
+    tsbundler-encore --bundle --engine=node:22 --outdir=.encore/nstack/cron-runner encore.gen/internal/entrypoints/combined/nstack-cron-runner.ts; \
+  fi
 RUN tsbundler-encore --bundle --engine=node:22 --outdir=.encore/nstack/bundle encore.gen/internal/entrypoints/combined/main.ts
+RUN find .encore/nstack -name '*.map' -delete
 RUN encore debug meta -f proto > /encore/meta
 RUN mkdir -p /encore/runtimes/js \
   && cp /root/.encore/runtimes/js/encore-runtime.node /encore/runtimes/js/encore-runtime.node \
@@ -65,6 +73,7 @@ RUN --mount=type=cache,id=nstack-backend-runtime-apt,target=/var/cache/apt,shari
 ARG NSTACK_GIT_COMMIT=local
 ARG NSTACK_IMAGE_TAG=local
 ENV NODE_ENV=production
+ENV RUST_LOG=info
 ENV PORT=8080
 ENV ENCORE_INFRA_CONFIG_PATH=/encore/infra.config.json
 ENV ENCORE_APP_META_PATH=/encore/meta
@@ -75,7 +84,8 @@ ENV IMAGE_TAG=${NSTACK_IMAGE_TAG}
 COPY --from=build /workspace/backend/package.json ./package.json
 COPY --from=build /root/.encore/runtimes/js/encore.dev ./node_modules/encore.dev
 COPY --from=build /workspace/backend/.encore/nstack/bundle ./.encore/build/combined
+COPY --from=build /workspace/backend/.encore/nstack/cron-runner ./.encore/nstack/cron-runner
 COPY --from=build /encore /encore
 
 EXPOSE 8080
-ENTRYPOINT ["node", "--enable-source-maps", "/workspace/backend/.encore/build/combined/combined/main.mjs"]
+ENTRYPOINT ["node", "/workspace/backend/.encore/build/combined/combined/main.mjs"]

@@ -413,7 +413,7 @@ export const refresh = new CronJob("refresh", { every: "5m" });
   assert.ok(report.drift.issues.some((issue) => issue.includes("uses 0 * * * *, expected */5 * * * *")));
   assert.ok(report.drift.issues.some((issue) => issue.includes("is disabled")));
   assert.ok(report.drift.issues.some((issue) => issue.includes("runs on service frontend, expected backend")));
-  assert.ok(report.drift.issues.some((issue) => issue.includes("command is out of sync with the Encore cron endpoint")));
+  assert.ok(report.drift.issues.some((issue) => issue.includes("command is out of sync with the private Encore cron runner")));
   assert.ok(report.drift.issues.some((issue) => issue.includes("Stale Dokploy schedule nstack-drift-app-stale")));
   assert.ok(report.drift.issues.some((issue) => issue.includes("ghcr.io/acme/drift/backend:abc123")));
   assert.ok(report.nextSteps.includes("Run `nstack deploy` to sync Dokploy with the current app."));

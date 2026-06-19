@@ -1,21 +1,28 @@
 import { spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
-import { copyFileSync, cpSync, existsSync, readFileSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { performance } from "node:perf_hooks";
-import { ensureDir, run, writeText } from "./util.js";
+import {
+  CRON_RUNNER_OUT_DIR,
+  CRON_RUNNER_SOURCE_PATH,
+  parseMetadataJson,
+  writeCronRunnerSource,
+} from "./cron-runner.js";
+import { commandOutput, ensureDir, run, writeText } from "./util.js";
 
 const thinBuildDir = ".encore/nstack";
 const bundledMain = "combined/main.mjs";
 
-export function buildBackendImage({ config, cwd, image, infraFile, platform, quiet = false, timings = null }) {
-  buildThinBackendImage({ config, cwd, image, infraFile, platform, quiet, timings });
+export function buildBackendImage({ config, cwd, image, infraFile, platform, resources = null, quiet = false, timings = null }) {
+  buildThinBackendImage({ config, cwd, image, infraFile, platform, resources, quiet, timings });
 }
 
-function buildThinBackendImage({ config, cwd, image, infraFile, platform, quiet, timings }) {
+function buildThinBackendImage({ config, cwd, image, infraFile, platform, resources, quiet, timings }) {
   const backendDir = path.join(cwd, config.paths.backend);
   const buildDir = path.join(backendDir, thinBuildDir);
   const bundleDir = path.join(buildDir, "bundle");
+  const cronRunnerDir = path.join(buildDir, "cron-runner");
   const contextDir = path.join(buildDir, "image");
   const entrypoint = "encore.gen/internal/entrypoints/combined/main.ts";
 
@@ -23,6 +30,15 @@ function buildThinBackendImage({ config, cwd, image, infraFile, platform, quiet,
     run("encore", ["gen", "wrappers"], { cwd: backendDir, capture: quiet });
   });
   assertFile(path.join(backendDir, entrypoint), "Encore combined entrypoint");
+
+  buildCronRunner({
+    backendDir,
+    cronRunnerDir,
+    metadata: resources?.metadata || null,
+    cronCount: Array.isArray(resources?.crons) ? resources.crons.length : null,
+    quiet,
+    timings,
+  });
 
   rmSync(bundleDir, { recursive: true, force: true });
   timed("backend: bundle", quiet, timings, () => {
@@ -34,8 +50,9 @@ function buildThinBackendImage({ config, cwd, image, infraFile, platform, quiet,
     ], { cwd: backendDir, capture: quiet });
   });
   assertFile(path.join(bundleDir, bundledMain), "bundled backend entrypoint");
+  removeSourceMaps(bundleDir);
 
-  stageThinContext({ config, backendDir, bundleDir, contextDir, infraFile, arch: platform.arch, quiet, timings });
+  stageThinContext({ config, backendDir, bundleDir, cronRunnerDir, contextDir, infraFile, arch: platform.arch, quiet, timings });
 
   if (!quiet) console.log(`Building backend ${image}`);
   timed("backend: docker build", quiet, timings, () => run("docker", [
@@ -51,7 +68,41 @@ function buildThinBackendImage({ config, cwd, image, infraFile, platform, quiet,
   });
 }
 
-function stageThinContext({ config, backendDir, bundleDir, contextDir, infraFile, arch, quiet, timings }) {
+function buildCronRunner({ backendDir, cronRunnerDir, metadata = null, cronCount = null, quiet, timings }) {
+  rmSync(cronRunnerDir, { recursive: true, force: true });
+  ensureDir(cronRunnerDir);
+  if (cronCount === 0) {
+    rmSync(path.join(backendDir, CRON_RUNNER_SOURCE_PATH), { force: true });
+    return;
+  }
+
+  const meta = metadata || timed("backend: inspect cron metadata", quiet, timings, () => parseMetadataJson(commandOutput("encore", ["debug", "meta", "-f", "json"], {
+    cwd: backendDir,
+    maxBuffer: 32 * 1024 * 1024,
+  })));
+  if (!Array.isArray(meta?.cron_jobs) || meta.cron_jobs.length === 0) {
+    rmSync(path.join(backendDir, CRON_RUNNER_SOURCE_PATH), { force: true });
+    return;
+  }
+
+  const shouldBundle = timed("backend: generate cron runner", quiet, timings, () => writeCronRunnerSource({
+    backendDir,
+    metadata: meta,
+  }));
+  if (!shouldBundle) return;
+
+  timed("backend: bundle cron runner", quiet, timings, () => {
+    run("tsbundler-encore", [
+      "--bundle",
+      "--engine=node:22",
+      `--outdir=${path.relative(backendDir, cronRunnerDir)}`,
+      CRON_RUNNER_SOURCE_PATH,
+    ], { cwd: backendDir, capture: quiet });
+  });
+  removeSourceMaps(cronRunnerDir);
+}
+
+function stageThinContext({ config, backendDir, bundleDir, cronRunnerDir, contextDir, infraFile, arch, quiet, timings }) {
   const appMeta = timed("backend: prepare app metadata", quiet, timings, () => encoreAppMeta(backendDir));
   const runtimeLib = timed("backend: resolve runtime binary", quiet, timings, () => encoreRuntimeLib({ backendDir, arch }));
   const runtimePackage = timed("backend: resolve runtime package", quiet, timings, () => encoreRuntimePackage({ backendDir }));
@@ -59,9 +110,11 @@ function stageThinContext({ config, backendDir, bundleDir, contextDir, infraFile
   timed("backend: stage image files", quiet, timings, () => {
     rmSync(contextDir, { recursive: true, force: true });
     ensureDir(path.join(contextDir, "workspace/backend/.encore/build/combined"));
+    ensureDir(path.join(contextDir, "workspace/backend", CRON_RUNNER_OUT_DIR));
     ensureDir(path.join(contextDir, "encore/runtimes/js"));
 
     cpSync(bundleDir, path.join(contextDir, "workspace/backend/.encore/build/combined"), { recursive: true });
+    cpSync(cronRunnerDir, path.join(contextDir, "workspace/backend", CRON_RUNNER_OUT_DIR), { recursive: true });
     copyFileSync(path.join(backendDir, "package.json"), path.join(contextDir, "workspace/backend/package.json"));
     copyFileSync(runtimeLib, path.join(contextDir, "encore/runtimes/js/encore-runtime.node"));
     cpSync(runtimePackage, path.join(contextDir, "encore/runtimes/js/encore.dev"), { recursive: true });
@@ -136,6 +189,7 @@ RUN apt-get update \\
 
 WORKDIR /workspace/backend
 ENV NODE_ENV=production
+ENV RUST_LOG=info
 ENV ENCORE_INFRA_CONFIG_PATH=/encore/infra.config.json
 ENV ENCORE_APP_META_PATH=/encore/meta
 ENV ENCORE_RUNTIME_LIB=/encore/runtimes/js/encore-runtime.node
@@ -143,9 +197,10 @@ ENV ENCORE_RUNTIME_LIB=/encore/runtimes/js/encore-runtime.node
 COPY workspace/backend/package.json ./package.json
 COPY encore/runtimes/js/encore.dev ./node_modules/encore.dev
 COPY workspace/backend/.encore/build/combined ./.encore/build/combined
+COPY workspace/backend/.encore/nstack/cron-runner ./.encore/nstack/cron-runner
 COPY encore /encore
 
-ENTRYPOINT ["node", "--enable-source-maps", "/workspace/backend/.encore/build/combined/${bundledMain}"]
+ENTRYPOINT ["node", "/workspace/backend/.encore/build/combined/${bundledMain}"]
 `);
 }
 
@@ -165,4 +220,26 @@ function timed(label, quiet, timings, task) {
   if (timings) timings.push({ name: label, ms: Math.round(durationMs) });
   if (!quiet) console.log(`${label}: ${(durationMs / 1000).toFixed(2)}s`);
   return result;
+}
+
+function removeSourceMaps(dir) {
+  for (const entry of readdirRecursive(dir)) {
+    if (entry.endsWith(".map")) rmSync(entry, { force: true });
+  }
+}
+
+function readdirRecursive(dir) {
+  const out = [];
+  let entries = [];
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...readdirRecursive(full));
+    else if (entry.isFile()) out.push(full);
+  }
+  return out;
 }

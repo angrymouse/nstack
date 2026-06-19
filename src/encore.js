@@ -116,6 +116,7 @@ function endpointForCron(meta, qualifiedName) {
       name: rpc.name,
       path: pathToString(rpc.path),
       method: rpc.http_methods?.[0] || "POST",
+      exposed: Boolean(rpc.expose && Object.keys(rpc.expose).length > 0),
     };
   }
   return {
@@ -123,6 +124,7 @@ function endpointForCron(meta, qualifiedName) {
     name: qualifiedName.name,
     path: `/${qualifiedName.pkg}.${qualifiedName.name}`,
     method: "POST",
+    exposed: null,
   };
 }
 

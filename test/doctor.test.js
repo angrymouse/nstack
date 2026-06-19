@@ -3,7 +3,8 @@ import { chmodSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { doctor } from "../src/doctor.js";
+import { createDoctorReport, doctor } from "../src/doctor.js";
+import { normalizeConfig } from "../src/config.js";
 
 test("doctor reports resolved config, files, secrets, tools, and state", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "nstack-doctor-"));
@@ -241,4 +242,61 @@ echo "Docker version 99.0.0"
     if (originalPath === undefined) delete process.env.PATH;
     else process.env.PATH = originalPath;
   }
+});
+
+test("doctor blocks deploys when Encore cron endpoints are public", async () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "nstack-doctor-cron-expose-"));
+  mkdirSync(path.join(cwd, ".nstack"), { recursive: true });
+  mkdirSync(path.join(cwd, "backend"), { recursive: true });
+  mkdirSync(path.join(cwd, "frontend"), { recursive: true });
+  writeFileSync(path.join(cwd, "backend", "Dockerfile"), "FROM scratch\n");
+  writeFileSync(path.join(cwd, "frontend", "Dockerfile"), "FROM scratch\n");
+  writeFileSync(path.join(cwd, "nstack.config.mjs"), `export default { app: { name: "Cron Expose", slug: "cron-expose" } };\n`);
+  writeFileSync(path.join(cwd, ".nstack", "local.env"), [
+    "NSTACK_DOMAIN=cron-expose.example.test",
+    "NSTACK_REPOSITORY=git@git.example.test:acme/cron-expose.git",
+    "NSTACK_BRANCH=main",
+    "DOKPLOY_URL=https://dokploy.example.test",
+    "DOKPLOY_API_KEY=dummy",
+    "",
+  ].join("\n"));
+
+  const config = normalizeConfig({
+    app: { name: "Cron Expose", slug: "cron-expose", domain: "cron-expose.example.test" },
+    deploy: {
+      buildMode: "compose",
+      source: { repository: "git@git.example.test:acme/cron-expose.git", branch: "main" },
+      provider: { url: "https://dokploy.example.test", apiKey: "dummy" },
+    },
+  });
+  const resources = {
+    source: "encore-metadata",
+    services: [],
+    databases: [],
+    caches: [],
+    topics: [],
+    buckets: [],
+    secrets: [],
+    crons: [
+      {
+        name: "public-refresh",
+        endpoint: { service: "api", name: "refresh", exposed: true },
+      },
+    ],
+  };
+
+  const report = await createDoctorReport({
+    cwd,
+    config,
+    state: {},
+    resources,
+    checkRemote: false,
+  });
+
+  const cronCheck = report.checks.find((check) => check.name === "cron-endpoints-private");
+  assert.equal(cronCheck.ok, false);
+  assert.deepEqual(report.resources.exposedCrons, ["public-refresh (api.refresh)"]);
+  assert.equal(report.ready.render, false);
+  assert.equal(report.ready.deploy, false);
+  assert.ok(report.nextSteps.includes("Make Encore cron endpoints private with api({ expose: false }, ...): public-refresh (api.refresh)"));
 });

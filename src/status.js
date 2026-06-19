@@ -125,6 +125,7 @@ function summarizeResources(resources) {
     source: resources.source,
     metadataError: resources.metadataError || null,
     crons: resources.crons.map((cron) => cron.name).sort(),
+    exposedCrons: exposedCrons(resources),
     databases: resources.databases.map((database) => database.name).sort(),
     caches: resources.caches.map((cache) => cache.name).sort(),
     topics: resources.topics.map((topic) => topic.name).sort(),
@@ -192,6 +193,9 @@ function analyzeDrift({ config, state, resources, remote, cwd }) {
   if (resources.source === "error") {
     issues.push(`Could not inspect current Encore resources: ${resources.metadataError}`);
   }
+  for (const cron of exposedCrons(resources)) {
+    issues.push(`Encore cron endpoint ${cron} is public; use api({ expose: false }, ...) before deploying.`);
+  }
   if (!remote.ok) {
     issues.push(remote.reason || "Remote Dokploy status could not be fully read.");
   }
@@ -236,7 +240,7 @@ function analyzeDrift({ config, state, resources, remote, cwd }) {
       issues.push(`Dokploy schedule ${expected.name} runs on service ${current.serviceName}, expected ${expected.serviceName}.`);
     }
     if (current.command !== null && current.command !== expected.command) {
-      issues.push(`Dokploy schedule ${expected.name} command is out of sync with the Encore cron endpoint.`);
+      issues.push(`Dokploy schedule ${expected.name} command is out of sync with the private Encore cron runner.`);
     }
   }
 
@@ -290,6 +294,16 @@ function expectedSchedulesOrIssues(config, composeId, crons, issues) {
     issues.push(error instanceof Error ? error.message : String(error));
     return [];
   }
+}
+
+function exposedCrons(resources) {
+  return (resources.crons || [])
+    .filter((cron) => cron.endpoint?.exposed === true)
+    .map((cron) => {
+      const endpoint = cron.endpoint || {};
+      return `${cron.name} (${endpoint.service || "unknown"}.${endpoint.name || "unknown"})`;
+    })
+    .sort();
 }
 
 function expectedReleaseImages(config, release) {

@@ -141,7 +141,7 @@ export async function deploy(options = {}) {
   }
 
   if (options.buildOnly) {
-    buildArtifacts({ config, cwd, artifacts, images, infraFile, composeFile, composeEnv: composeBuildEnv, quiet: options.json, timings });
+    buildArtifacts({ config, cwd, resources, artifacts, images, infraFile, composeFile, composeEnv: composeBuildEnv, quiet: options.json, timings });
     writeReleaseManifest(releaseFile, releaseManifest({ config, resources, images, release, infraFile, composeFile }));
     const report = deploymentReport({
       mode: "build",
@@ -161,7 +161,7 @@ export async function deploy(options = {}) {
   }
 
   if (!skipBuild) {
-    buildArtifacts({ config, cwd, artifacts, images, infraFile, composeFile, composeEnv: composeBuildEnv, quiet: options.json, timings });
+    buildArtifacts({ config, cwd, resources, artifacts, images, infraFile, composeFile, composeEnv: composeBuildEnv, quiet: options.json, timings });
     writeReleaseManifest(releaseFile, releaseManifest({ config, resources, images, release, infraFile, composeFile }));
   }
 
@@ -1305,7 +1305,7 @@ function buildOnlySecretEnv(resources, secretEnv) {
   ]));
 }
 
-function buildArtifacts({ config, cwd, artifacts, images, infraFile, composeFile, composeEnv = {}, quiet = false, timings = null }) {
+function buildArtifacts({ config, cwd, resources, artifacts, images, infraFile, composeFile, composeEnv = {}, quiet = false, timings = null }) {
   if (artifacts.mode === "compose") {
     if (!quiet) console.log(`Building ${config.app.slug} with Docker Compose`);
     timed("compose: docker compose build", quiet, timings, () => run("docker", [
@@ -1315,12 +1315,12 @@ function buildArtifacts({ config, cwd, artifacts, images, infraFile, composeFile
     ], { cwd, capture: quiet, env: { ...process.env, ...composeEnv } }));
     return;
   }
-  buildImages({ config, cwd, images, infraFile, quiet, timings });
+  buildImages({ config, cwd, resources, images, infraFile, quiet, timings });
 }
 
-function buildImages({ config, cwd, images, infraFile, quiet = false, timings = null }) {
+function buildImages({ config, cwd, resources, images, infraFile, quiet = false, timings = null }) {
   const platform = normalizeTargetPlatform(config.deploy.platform);
-  buildBackendImage({ config, cwd, image: images.backend, infraFile, platform, quiet, timings });
+  buildBackendImage({ config, cwd, image: images.backend, infraFile, platform, resources, quiet, timings });
 
   if (!fileExists(path.join(cwd, config.paths.frontendDockerfile))) {
     throw new Error(`${config.paths.frontendDockerfile} not found.`);

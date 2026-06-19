@@ -64,7 +64,9 @@ For the detailed operator guide, see [USING_NSTACK.md](USING_NSTACK.md).
   keep `/objects` on the app domain while backend S3 traffic stays internal.
 - Dokploy Domains/Traefik route `/` to Nuxt, `/api` to Encore, and `/objects`
   to the RustFS public adapter only when a public Encore bucket is declared.
-- Dokploy Schedules run Encore cron jobs against the backend service.
+- Dokploy Schedules run Encore cron jobs inside the backend container through a
+  bundled private runner; cron endpoints should use `api({ expose: false }, ...)`
+  so they cannot be triggered from public HTTP.
 - Encore `secret()` values are stored as Dokploy Compose environment variables
   through `nstack env set`, `nstack env push`, and deploy.
 

@@ -355,7 +355,8 @@ During the first deploy, nstack will:
 - Create or update the Dokploy Compose app.
 - Save Compose environment values.
 - Create or update Dokploy Domains/Traefik routes.
-- Create or update Dokploy schedules for Encore cron jobs.
+- Create or update Dokploy schedules for Encore cron jobs. These schedules run a
+  bundled private cron runner inside the backend container, not public HTTP routes.
 - Trigger the deployment.
 - Wait for completion.
 - Verify the public app.
@@ -546,10 +547,11 @@ On deploy, nstack can create or update:
 - Dokploy native Postgres when Encore declares SQL databases.
 - Dokploy native Redis-compatible Dragonfly cache resources when Encore declares
   cache resources.
-- Compose services for backend, frontend, NSQ Pub/Sub, and MinIO object storage.
+- Compose services for backend, frontend, NSQ Pub/Sub, and RustFS object storage.
 - Domains/Traefik routes for frontend, API traffic, and public object buckets.
 - Compose environment variables for generated infrastructure credentials and Encore `secret()` values.
-- Dokploy schedules for Encore cron jobs.
+- Dokploy schedules for Encore cron jobs. Cron endpoints must be private
+  (`api({ expose: false }, ...)`) so external callers cannot trigger them.
 
 The generated Compose file is not meant to be hand-edited. Change source config, backend code, frontend code, or nstack config, then re-render or deploy.
 

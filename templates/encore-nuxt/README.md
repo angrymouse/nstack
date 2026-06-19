@@ -59,3 +59,7 @@ nstack rollback
 Domains/Traefik handle ingress; there is no proxy container in this template.
 By default Dokploy builds the production Nuxt server and Encore backend from
 source through Compose, so no external image registry is required.
+
+Encore cron jobs are registered as Dokploy schedules. Keep cron endpoints
+private with `api({ expose: false }, ...)`; Dokploy executes them through the
+bundled backend cron runner instead of calling a public HTTP route.

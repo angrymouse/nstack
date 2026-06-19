@@ -59,11 +59,13 @@ test("syncSchedules creates, updates, and prunes Dokploy compose schedules", asy
   assert.equal(update.body.composeId, "compose-1");
   assert.equal(update.body.serviceName, "backend");
   assert.equal(update.body.cronExpression, "*/5 * * * *");
-  assert.match(update.body.command, /node --input-type=module -e/);
+  assert.match(update.body.command, /^NODE_ENV=production node \.encore\/nstack\/cron-runner\/encore\.gen\/internal\/entrypoints\/combined\/nstack-cron-runner\.mjs 'refresh'$/);
+  assert.doesNotMatch(update.body.command, /fetch|127\.0\.0\.1|--input-type=module/);
 
   const create = calls.find((call) => call.path === "/api/schedule.create");
   assert.equal(create.body.name, "nstack-cron-app-daily");
   assert.equal(create.body.cronExpression, "0 0 * * *");
+  assert.match(create.body.command, /nstack-cron-runner\.mjs 'daily'$/);
 
   const deletes = calls
     .filter((call) => call.path === "/api/schedule.delete")
