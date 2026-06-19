@@ -169,6 +169,7 @@ export class DokployProvider {
     if (existing) {
       await this.updateComposeFile(environmentId, existing, composeFile, source);
       await this.saveComposeEnvironment(existing, env);
+      await this.ensureSourceWebhook(existing, source);
       return existing;
     }
     const created = await this.client.apiPost("compose.create", {
@@ -184,6 +185,7 @@ export class DokployProvider {
     if (!composeId) throw new Error(`Dokploy compose.create did not return a compose id: ${JSON.stringify(created)}`);
     await this.updateComposeFile(environmentId, composeId, composeFile, source);
     await this.saveComposeEnvironment(composeId, env);
+    await this.ensureSourceWebhook(composeId, source);
     return composeId;
   }
 
@@ -240,6 +242,16 @@ export class DokployProvider {
       if (!isUnknownEndpoint(error)) throw error;
       await this.client.apiPost("compose.update", { composeId, env });
     }
+  }
+
+  async ensureSourceWebhook(composeId, source = null) {
+    if (source?.sourceType !== "gitea") return null;
+    const compose = await this.client.apiGet("compose.one", { composeId });
+    return ensureGiteaComposeWebhook({
+      dokployUrl: this.client.url,
+      compose,
+      source,
+    });
   }
 
   async ensureDomains(composeId) {
@@ -530,6 +542,62 @@ function composeSourcePayload(source = null) {
     };
   }
   return {};
+}
+
+export async function ensureGiteaComposeWebhook({ dokployUrl, compose, source }) {
+  const refreshToken = compose?.refreshToken || "";
+  const gitea = compose?.gitea || {};
+  const token = gitea.accessToken || "";
+  const giteaUrl = gitea.giteaInternalUrl || gitea.giteaUrl || "";
+  if (!refreshToken || !token || !giteaUrl || !source?.owner || !source?.repository) return null;
+
+  const hookUrl = `${String(dokployUrl || "").replace(/\/+$/, "")}/api/deploy/compose/${refreshToken}`;
+  const repoPath = `${encodeURIComponent(source.owner)}/${encodeURIComponent(source.repository)}`;
+  const apiBase = String(giteaUrl).replace(/\/+$/, "");
+  const hooks = await giteaRequest(apiBase, token, `/api/v1/repos/${repoPath}/hooks`, { method: "GET" });
+  const existing = asList(hooks).find((hook) => giteaHookUrl(hook) === hookUrl);
+  if (existing) return { created: false, hookUrl };
+
+  await giteaRequest(apiBase, token, `/api/v1/repos/${repoPath}/hooks`, {
+    method: "POST",
+    body: {
+      type: "gitea",
+      config: {
+        url: hookUrl,
+        content_type: "json",
+      },
+      events: ["push"],
+      active: true,
+    },
+  });
+  return { created: true, hookUrl };
+}
+
+async function giteaRequest(apiBase, token, path, { method = "GET", body = null } = {}) {
+  const response = await fetch(`${apiBase}${path}`, {
+    method,
+    headers: {
+      authorization: `token ${token}`,
+      accept: "application/json",
+      ...(body ? { "content-type": "application/json" } : {}),
+    },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  const text = await response.text();
+  let value = text;
+  try {
+    value = text ? JSON.parse(text) : {};
+  } catch {
+    // keep text response
+  }
+  if (!response.ok) {
+    throw new Error(`Gitea ${method} ${path} failed: ${response.status} ${typeof value === "string" ? value : JSON.stringify(value)}`);
+  }
+  return value;
+}
+
+function giteaHookUrl(hook) {
+  return hook?.config?.url || hook?.url || "";
 }
 
 function resolveSourceType(sourceConfig, parsed, providers) {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { DokployProvider } from "../src/providers/dokploy.js";
+import { DokployProvider, ensureGiteaComposeWebhook } from "../src/providers/dokploy.js";
 
 test("upsertCompose saves Compose env with Dokploy environment endpoint", async () => {
   const calls = [];
@@ -428,4 +428,92 @@ test("resolveComposeSource supports explicit plain Git source mode", async () =>
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("ensureGiteaComposeWebhook creates a missing Forgejo webhook", async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    const parsed = new URL(String(url));
+    const body = init.body ? JSON.parse(init.body) : null;
+    calls.push({ method: init.method || "GET", path: parsed.pathname, body, authorization: init.headers?.authorization });
+    if ((init.method || "GET") === "GET") return Response.json([]);
+    return Response.json({ id: 10 });
+  };
+
+  try {
+    const result = await ensureGiteaComposeWebhook({
+      dokployUrl: "https://dokploy.example.test",
+      compose: {
+        refreshToken: "refresh-1",
+        gitea: {
+          giteaUrl: "https://git.example.test/",
+          accessToken: "token-1",
+        },
+      },
+      source: {
+        owner: "acme",
+        repository: "source-app",
+      },
+    });
+    assert.deepEqual(result, {
+      created: true,
+      hookUrl: "https://dokploy.example.test/api/deploy/compose/refresh-1",
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(calls.map((call) => [call.method, call.path]), [
+    ["GET", "/api/v1/repos/acme/source-app/hooks"],
+    ["POST", "/api/v1/repos/acme/source-app/hooks"],
+  ]);
+  assert.equal(calls[0].authorization, "token token-1");
+  assert.equal(calls[1].body.type, "gitea");
+  assert.equal(calls[1].body.config.url, "https://dokploy.example.test/api/deploy/compose/refresh-1");
+  assert.equal(calls[1].body.config.content_type, "json");
+  assert.deepEqual(calls[1].body.events, ["push"]);
+  assert.equal(calls[1].body.active, true);
+});
+
+test("ensureGiteaComposeWebhook keeps an existing Forgejo webhook", async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    const parsed = new URL(String(url));
+    calls.push({ method: init.method || "GET", path: parsed.pathname });
+    return Response.json([
+      {
+        id: 10,
+        config: {
+          url: "https://dokploy.example.test/api/deploy/compose/refresh-1",
+        },
+      },
+    ]);
+  };
+
+  try {
+    const result = await ensureGiteaComposeWebhook({
+      dokployUrl: "https://dokploy.example.test/",
+      compose: {
+        refreshToken: "refresh-1",
+        gitea: {
+          giteaUrl: "https://git.example.test",
+          accessToken: "token-1",
+        },
+      },
+      source: {
+        owner: "acme",
+        repository: "source-app",
+      },
+    });
+    assert.deepEqual(result, {
+      created: false,
+      hookUrl: "https://dokploy.example.test/api/deploy/compose/refresh-1",
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(calls, [{ method: "GET", path: "/api/v1/repos/acme/source-app/hooks" }]);
 });
