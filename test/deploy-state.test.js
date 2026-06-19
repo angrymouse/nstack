@@ -14,7 +14,9 @@ test("render does not require Dokploy credentials", async () => {
   deploy: { provider: { type: "dokploy" } },
 };\n`);
   writeFileSync(path.join(cwd, "backend", "api", "db.ts"), `import { SQLDatabase } from "encore.dev/storage/sqldb";
+import { Bucket } from "encore.dev/storage/objects";
 export const db = new SQLDatabase("app", {});
+export const uploads = new Bucket("uploads", {});
 `);
   writeFileSync(path.join(cwd, "backend", "api", "gateway.ts"), `import { Gateway } from "encore.dev/api";
 export const gateway = new Gateway({});
@@ -525,7 +527,9 @@ test("deploy persists generated infra state before later Dokploy failures", asyn
   verify: { endpoints: [] },
 };\n`);
   writeFileSync(path.join(cwd, "backend", "api", "db.ts"), `import { SQLDatabase } from "encore.dev/storage/sqldb";
+import { Bucket } from "encore.dev/storage/objects";
 export const db = new SQLDatabase("app", {});
+export const uploads = new Bucket("uploads", {});
 `);
 
   const envKeys = ["NSTACK_DOMAIN", "NSTACK_REGISTRY", "DOKPLOY_URL", "DOKPLOY_API_KEY"];
@@ -583,6 +587,9 @@ export const db = new SQLDatabase("app", {});
   assert.equal(state.dokploy.composeId, "compose-1");
   assert.equal(state.infra.postgres.user, "nstack");
   assert.match(state.infra.postgres.password, /^[A-Za-z0-9_-]+$/);
+  assert.match(state.infra.objectStorage.accessKey, /^[A-Za-z0-9_-]+$/);
+  assert.match(state.infra.objectStorage.secretKey, /^[A-Za-z0-9_-]+$/);
+  assert.equal(state.infra.objectStorage.endpoint, "http://state-test-minio:9000");
   assert.equal(state.lastRelease, undefined);
   assert.ok(calls.includes("domain.byComposeId"));
 });
@@ -720,6 +727,86 @@ export const db = new SQLDatabase("app", {});
   assert.equal(state.dokploy.projectId, "project-1");
   assert.equal(state.dokploy.environmentId, "environment-1");
   assert.equal(state.infra?.postgres?.password, undefined);
+});
+
+test("deploy can add first object storage bucket to an existing Compose app", async () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "nstack-existing-bucket-"));
+  mkdirSync(path.join(cwd, ".nstack"), { recursive: true });
+  mkdirSync(path.join(cwd, "backend", "api"), { recursive: true });
+  writeFileSync(path.join(cwd, "nstack.config.mjs"), `export default {
+  app: { name: "Existing Bucket", slug: "existing-bucket" },
+  paths: { backend: "backend", frontend: "frontend", frontendDockerfile: "frontend/Dockerfile" },
+  deploy: { provider: { type: "dokploy" } },
+  verify: { endpoints: [] },
+};\n`);
+  writeFileSync(path.join(cwd, "backend", "api", "bucket.ts"), `import { Bucket } from "encore.dev/storage/objects";
+export const uploads = new Bucket("uploads", {});
+`);
+  writeFileSync(path.join(cwd, ".nstack", "state.json"), JSON.stringify({
+    dokploy: { composeId: "compose-1" },
+  }));
+
+  const envKeys = ["NSTACK_DOMAIN", "NSTACK_REGISTRY", "DOKPLOY_URL", "DOKPLOY_API_KEY"];
+  const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+  process.env.NSTACK_DOMAIN = "existing-bucket.example.test";
+  process.env.NSTACK_REGISTRY = "ghcr.io/acme/existing-bucket";
+  process.env.DOKPLOY_URL = "https://dokploy.example.test";
+  process.env.DOKPLOY_API_KEY = "dummy";
+
+  let savedEnv = "";
+  let updatedCompose = "";
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    const parsed = new URL(String(url));
+    const endpoint = parsed.pathname.replace(/^\/api\/(?:trpc\/)?/, "");
+    const body = init.body ? JSON.parse(init.body) : null;
+    if (init.method === "GET") {
+      if (endpoint === "project.all" || endpoint === "environment.byProjectId" || endpoint === "domain.byComposeId" || endpoint === "schedule.list") {
+        return Response.json({ json: [] });
+      }
+      if (endpoint === "settings.getIp" || endpoint === "server.publicIp") {
+        return Response.json({ json: { ip: "203.0.113.10" } });
+      }
+      if (endpoint === "compose.one") {
+        return Response.json({ json: { composeId: "compose-1", env: "API_SECRET=existing\n" } });
+      }
+      return Response.json({ json: [] });
+    }
+    if (endpoint === "compose.update") updatedCompose = body.composeFile || updatedCompose;
+    if (endpoint === "compose.saveEnvironment") savedEnv = body.env;
+    if (endpoint === "domain.validateDomain") return Response.json({ json: { isValid: true, resolvedIp: "203.0.113.10" } });
+    const ids = {
+      "project.create": { projectId: "project-1" },
+      "environment.create": { environmentId: "environment-1" },
+      "domain.create": { domainId: "domain-1" },
+    };
+    return Response.json({ json: ids[endpoint] || {} });
+  };
+
+  try {
+    await deploy({
+      cwd,
+      skipBuild: true,
+      skipVerify: true,
+      skipStatus: true,
+      noWait: true,
+      yes: true,
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const key of envKeys) {
+      if (originalEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = originalEnv[key];
+    }
+  }
+
+  const state = JSON.parse(readFileSync(path.join(cwd, ".nstack", "state.json"), "utf8"));
+  assert.equal(state.dokploy.composeId, "compose-1");
+  assert.match(state.infra.objectStorage.accessKey, /^[A-Za-z0-9_-]+$/);
+  assert.match(state.infra.objectStorage.secretKey, /^[A-Za-z0-9_-]+$/);
+  assert.match(savedEnv, /NSTACK_MINIO_ACCESS_KEY=/);
+  assert.match(savedEnv, /NSTACK_MINIO_SECRET_KEY=/);
+  assert.match(updatedCompose, /minio\/minio:latest/);
 });
 
 test("render preflight reports missing backend without raw filesystem errors", async () => {

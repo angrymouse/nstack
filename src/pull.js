@@ -44,6 +44,7 @@ export async function pull(options = {}) {
       scheduleCount: Object.keys(nextState.dokploy?.schedules || {}).length,
       postgresPasswordSet: Boolean(nextState.infra?.postgres?.password),
       redisPasswordSet: Boolean(nextState.infra?.redis?.password),
+      objectStorageSecretSet: Boolean(nextState.infra?.objectStorage?.secretKey),
     },
     remote: {
       compose: pulled.compose?.name || pulled.compose?.id || null,
@@ -98,6 +99,16 @@ function mergePulledInfra({ config, resources, current, env, force }) {
       appName: current.redis?.appName || `${config.app.slug}-redis`,
       host: current.redis?.host || `${config.app.slug}-redis:6379`,
       password: chooseValue(current.redis?.password, env.NSTACK_REDIS_PASSWORD, force),
+    };
+  }
+  if (resources.buckets.length > 0) {
+    next.objectStorage = {
+      appName: current.objectStorage?.appName || `${config.app.slug}-minio`,
+      host: current.objectStorage?.host || `${config.app.slug}-minio:9000`,
+      endpoint: current.objectStorage?.endpoint || `http://${config.app.slug}-minio:9000`,
+      region: current.objectStorage?.region || "us-east-1",
+      accessKey: chooseValue(current.objectStorage?.accessKey, env.NSTACK_MINIO_ACCESS_KEY, force),
+      secretKey: chooseValue(current.objectStorage?.secretKey, env.NSTACK_MINIO_SECRET_KEY, force),
     };
   }
   return next;
@@ -157,6 +168,8 @@ function remoteAppEnvKeys(env = {}) {
 const infraEnvKeys = new Set([
   "NSTACK_POSTGRES_PASSWORD",
   "NSTACK_REDIS_PASSWORD",
+  "NSTACK_MINIO_ACCESS_KEY",
+  "NSTACK_MINIO_SECRET_KEY",
 ]);
 
 function chooseValue(current, remote, force) {

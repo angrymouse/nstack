@@ -59,9 +59,13 @@ For the detailed operator guide, see [USING_NSTACK.md](USING_NSTACK.md).
 - Dokploy native Postgres and Redis are created when Encore declares SQL
   databases or cache clusters.
 - Dokploy Compose builds and runs the backend/frontend services plus generated
-  support services such as NSQ for Pub/Sub.
-- Dokploy Domains/Traefik route `/` to Nuxt and `/api` to Encore.
+  support services such as NSQ for Pub/Sub and MinIO for Encore object storage
+  buckets.
+- Dokploy Domains/Traefik route `/` to Nuxt, `/api` to Encore, and `/objects`
+  to MinIO only when a public Encore bucket is declared.
 - Dokploy Schedules run Encore cron jobs against the backend service.
+- Encore `secret()` values are stored as Dokploy Compose environment variables
+  through `nstack env set`, `nstack env push`, and deploy.
 
 There is no Caddy container and no manual Traefik label surface in generated
 Compose.

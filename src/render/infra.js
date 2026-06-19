@@ -1,5 +1,8 @@
+import { objectStorageBucketName } from "../resource-names.js";
+
 export function renderEncoreInfra(ctx) {
-  const { config, resources, infra } = ctx;
+  const { config, infra } = ctx;
+  const resources = normalizeResources(ctx.resources);
   const baseUrl = `https://${config.app.domain}/api`;
   const appId = config.app.slug;
   const gatewayNames = hostedGatewayNames(resources);
@@ -61,6 +64,25 @@ export function renderEncoreInfra(ctx) {
     ];
   }
 
+  if (resources.buckets.length > 0) {
+    result.object_storage = [
+      {
+        type: "s3",
+        access_key_id: { $env: "NSTACK_MINIO_ACCESS_KEY" },
+        secret_access_key: { $env: "NSTACK_MINIO_SECRET_KEY" },
+        region: infra.objectStorage.region,
+        endpoint: infra.objectStorage.endpoint,
+        buckets: Object.fromEntries(resources.buckets.map((bucket) => [
+          bucket.name,
+          {
+            name: objectStorageBucketName(appId, bucket),
+            ...(bucket.public ? { public_base_url: `https://${config.app.domain}/objects/${objectStorageBucketName(appId, bucket)}` } : {}),
+          },
+        ])),
+      },
+    ];
+  }
+
   if (resources.caches.length > 0) {
     result.redis = Object.fromEntries(resources.caches.map((cache, index) => [
       cache.name,
@@ -77,6 +99,18 @@ export function renderEncoreInfra(ctx) {
   }
 
   return `${JSON.stringify(stripUndefined(result), null, 2)}\n`;
+}
+
+function normalizeResources(resources = {}) {
+  return {
+    services: [],
+    databases: [],
+    topics: [],
+    buckets: [],
+    caches: [],
+    secrets: [],
+    ...resources,
+  };
 }
 
 function hostedGatewayNames(resources) {

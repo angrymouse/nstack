@@ -184,7 +184,7 @@ function deploymentLine(deployment) {
 
 function analyzeDrift({ config, state, resources, remote, cwd }) {
   const issues = [];
-  const expectedDomains = expectedComposeDomains(config, state.dokploy?.composeId || "");
+  const expectedDomains = expectedComposeDomains(config, state.dokploy?.composeId || "", resources);
   const expectedSchedules = expectedSchedulesOrIssues(config, state.dokploy?.composeId || "", resources.crons, issues);
   const expectedImages = expectedReleaseImages(config, expectedReleaseForStatus(state));
   const expectedEnv = expectedComposeEnvForStatus({ cwd, config, resources, state, issues });
@@ -336,16 +336,24 @@ function expectedComposeEnvForStatus({ cwd, config, resources, state, issues }) 
   if (resources.caches.length > 0 && !infra.redis?.password && hasRemoteInfraState(state, "redis")) {
     issues.push("Missing local infrastructure state for NSTACK_REDIS_PASSWORD; run `nstack pull` to recover it from Dokploy before deploying.");
   }
+  if (resources.buckets.length > 0 && (!infra.objectStorage?.accessKey || !infra.objectStorage?.secretKey) && hasRemoteInfraState(state, "objectStorage")) {
+    issues.push("Missing local infrastructure state for NSTACK_MINIO_SECRET_KEY; run `nstack pull` to recover it from Dokploy before deploying.");
+  }
 
   return composeEnvironmentValues({
     resources: {
       ...resources,
       databases: infra.postgres?.password ? resources.databases : [],
       caches: infra.redis?.password ? resources.caches : [],
+      buckets: infra.objectStorage?.accessKey && infra.objectStorage?.secretKey ? resources.buckets : [],
     },
     infra: {
       postgres: { password: infra.postgres?.password || "" },
       redis: { password: infra.redis?.password || "" },
+      objectStorage: {
+        accessKey: infra.objectStorage?.accessKey || "",
+        secretKey: infra.objectStorage?.secretKey || "",
+      },
     },
     secretEnv: comparableSecretEnv,
   });

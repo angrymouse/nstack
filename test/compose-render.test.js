@@ -74,3 +74,36 @@ test("compose renderer keeps source build values in Dokploy env placeholders", (
   assert.match(output, /ENCORE_INFRA_CONFIG_B64: "\$\{ENCORE_INFRA_CONFIG_B64:\?set ENCORE_INFRA_CONFIG_B64\}"/);
   assert.doesNotMatch(output, /abc123/);
 });
+
+test("compose renderer provisions MinIO for Encore object storage buckets", () => {
+  const output = renderDokployCompose({
+    config: {
+      app: { slug: "bucket-app", domain: "bucket.example.test" },
+      deploy: { target: "prod" },
+    },
+    resources: {
+      databases: [],
+      caches: [],
+      topics: [],
+      buckets: [{ name: "uploads" }, { name: "public-assets", public: true }],
+      secrets: [],
+      crons: [],
+    },
+    images: {
+      backend: "ghcr.io/acme/bucket/backend:tag",
+      frontend: "ghcr.io/acme/bucket/frontend:tag",
+    },
+    release: { commit: "abc123", tag: "tag" },
+  });
+
+  assert.match(output, /minio:\n\s+image: "minio\/minio:latest"/);
+  assert.match(output, /MINIO_ROOT_USER: "\$\{NSTACK_MINIO_ACCESS_KEY:\?set NSTACK_MINIO_ACCESS_KEY\}"/);
+  assert.match(output, /MINIO_ROOT_PASSWORD: "\$\{NSTACK_MINIO_SECRET_KEY:\?set NSTACK_MINIO_SECRET_KEY\}"/);
+  assert.match(output, /aliases:\n\s+- "bucket-app-minio"/);
+  assert.match(output, /minio-init:\n\s+image: "minio\/mc:latest"/);
+  assert.match(output, /entrypoint:\n\s+- "\/bin\/sh"\n\s+- "-c"/);
+  assert.match(output, /mc mb --ignore-existing local\/bucket-app-uploads/);
+  assert.match(output, /mc anonymous set download local\/bucket-app-public-assets/);
+  assert.match(output, /backend:[\s\S]*depends_on:[\s\S]*minio:[\s\S]*condition: "service_started"/);
+  assert.match(output, /minio_data: \{\}/);
+});

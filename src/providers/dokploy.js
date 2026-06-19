@@ -255,9 +255,9 @@ export class DokployProvider {
     });
   }
 
-  async ensureDomains(composeId) {
+  async ensureDomains(composeId, resources = {}) {
     const domains = asList(await this.client.apiGet("domain.byComposeId", { composeId }));
-    for (const domain of expectedComposeDomains(this.config, composeId)) {
+    for (const domain of expectedComposeDomains(this.config, composeId, resources)) {
       await this.upsertDomain(domains, domain);
     }
   }
@@ -431,6 +431,11 @@ export class DokployProvider {
       env,
       compose: summarizeCompose(compose, composeId),
     };
+  }
+
+  async readComposeEnvironment(composeId) {
+    const compose = await this.client.apiGet("compose.one", { composeId });
+    return parseDotEnv(compose?.env || compose?.environment || "");
   }
 
   async pullScheduleMap(composeId, crons) {
@@ -767,8 +772,8 @@ export function existingInfraSecretError(kind, name, envKey) {
   ].join(" "));
 }
 
-export function expectedComposeDomains(config, composeId = "") {
-  return [
+export function expectedComposeDomains(config, composeId = "", resources = {}) {
+  const domains = [
     {
       composeId,
       serviceName: "frontend",
@@ -788,6 +793,18 @@ export function expectedComposeDomains(config, composeId = "") {
       stripPath: true,
     },
   ];
+  if ((resources.buckets || []).some((bucket) => bucket.public)) {
+    domains.push({
+      composeId,
+      serviceName: "minio",
+      host: config.app.domain,
+      path: "/objects",
+      port: 9000,
+      internalPath: "/",
+      stripPath: true,
+    });
+  }
+  return domains;
 }
 
 export function expectedComposeSchedules(config, composeId, crons) {

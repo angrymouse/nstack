@@ -12,7 +12,9 @@ test("pull hydrates target state and declared secrets from Dokploy", async () =>
   mkdirSync(path.join(cwd, "backend", "api"), { recursive: true });
   writeFileSync(path.join(cwd, "nstack.config.mjs"), `export default { app: { name: "Pull App", slug: "pull-app" } };\n`);
   writeFileSync(path.join(cwd, "backend", "api", "resources.ts"), `import { SQLDatabase } from "encore.dev/storage/sqldb";
+import { Bucket } from "encore.dev/storage/objects";
 export const db = new SQLDatabase("app", {});
+export const uploads = new Bucket("uploads", {});
 function secret(name) { return name; }
 export const apiSecret = secret("API_SECRET");
 function CronJob(name, config) { return { name, config }; }
@@ -52,6 +54,8 @@ export const refresh = new CronJob("refresh", { every: "5m" });
         composeType: "docker-compose",
         env: [
           "NSTACK_POSTGRES_PASSWORD=remote-postgres-password",
+          "NSTACK_MINIO_ACCESS_KEY=remote-minio-access",
+          "NSTACK_MINIO_SECRET_KEY=remote-minio-secret",
           "API_SECRET=remote-api-secret",
           "UNDECLARED_SECRET=ignored",
           "",
@@ -85,10 +89,14 @@ export const refresh = new CronJob("refresh", { every: "5m" });
   assert.equal(state.dokploy.postgresId, "postgres-1");
   assert.deepEqual(state.dokploy.schedules, { refresh: "schedule-1" });
   assert.equal(state.infra.postgres.password, "remote-postgres-password");
+  assert.equal(state.infra.objectStorage.accessKey, "remote-minio-access");
+  assert.equal(state.infra.objectStorage.secretKey, "remote-minio-secret");
+  assert.equal(state.infra.objectStorage.endpoint, "http://pull-app-minio:9000");
   assert.match(secrets, /API_SECRET=remote-api-secret/);
   assert.doesNotMatch(secrets, /UNDECLARED_SECRET/);
+  assert.doesNotMatch(secrets, /NSTACK_MINIO/);
   assert.deepEqual(report.secrets.written, ["API_SECRET"]);
-  assert.doesNotMatch(json, /remote-api-secret|remote-postgres-password/);
+  assert.doesNotMatch(json, /remote-api-secret|remote-postgres-password|remote-minio-access|remote-minio-secret/);
 });
 
 test("pull preserves existing local secret values unless forced", async () => {
@@ -176,6 +184,8 @@ test("env pull --all hydrates all remote app env keys without printing values", 
         name: "env-pull-all-app",
         env: [
           "NSTACK_POSTGRES_PASSWORD=remote-postgres-password",
+          "NSTACK_MINIO_ACCESS_KEY=remote-minio-access",
+          "NSTACK_MINIO_SECRET_KEY=remote-minio-secret",
           "API_SECRET=remote-api-secret",
           "UNDECLARED_SECRET=remote-undeclared-secret",
           "EMPTY_SECRET=",
@@ -202,9 +212,10 @@ test("env pull --all hydrates all remote app env keys without printing values", 
   assert.match(secrets, /UNDECLARED_SECRET=remote-undeclared-secret/);
   assert.match(secrets, /EMPTY_SECRET=/);
   assert.doesNotMatch(secrets, /NSTACK_POSTGRES_PASSWORD/);
+  assert.doesNotMatch(secrets, /NSTACK_MINIO_ACCESS_KEY|NSTACK_MINIO_SECRET_KEY/);
   assert.equal(report.secrets.mode, "all");
   assert.deepEqual(report.secrets.available, ["API_SECRET", "EMPTY_SECRET", "UNDECLARED_SECRET"]);
   assert.deepEqual(report.secrets.written, ["API_SECRET", "EMPTY_SECRET", "UNDECLARED_SECRET"]);
   assert.deepEqual(report.secrets.missing, []);
-  assert.doesNotMatch(json, /remote-api-secret|remote-undeclared-secret|remote-postgres-password/);
+  assert.doesNotMatch(json, /remote-api-secret|remote-undeclared-secret|remote-postgres-password|remote-minio-access|remote-minio-secret/);
 });

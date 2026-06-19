@@ -79,13 +79,14 @@ export async function deploy(options = {}) {
   const generatedInfraSecrets = {
     postgres: resources.databases.length > 0 && !state.infra?.postgres?.password,
     redis: resources.caches.length > 0 && !state.infra?.redis?.password,
+    objectStorage: resources.buckets.length > 0 && (!state.infra?.objectStorage?.accessKey || !state.infra?.objectStorage?.secretKey),
   };
   const nextState = {
     ...state,
     dokploy: { ...(state.dokploy || {}) },
     infra,
   };
-  const safeGeneratedInfra = { postgres: false, redis: false };
+  const safeGeneratedInfra = { postgres: false, redis: false, objectStorage: false };
   const persistState = () => saveState(
     stateForSafeSave(nextState, generatedInfraSecrets, safeGeneratedInfra),
     cwd,
@@ -160,6 +161,20 @@ export async function deploy(options = {}) {
   nextState.dokploy.environmentId = environmentId;
   persistState();
 
+  if (resources.buckets.length > 0) {
+    const existingComposeId = nextState.dokploy.composeId || await provider.findComposeId(environmentId);
+    if (existingComposeId && generatedInfraSecrets.objectStorage) {
+      const remoteEnv = await provider.readComposeEnvironment(existingComposeId);
+      if (remoteEnv.NSTACK_MINIO_ACCESS_KEY || remoteEnv.NSTACK_MINIO_SECRET_KEY) {
+        throw existingInfraSecretError("object storage service", `${config.app.slug}-minio`, "NSTACK_MINIO_SECRET_KEY");
+      }
+    }
+    if (generatedInfraSecrets.objectStorage) {
+      safeGeneratedInfra.objectStorage = true;
+      persistState();
+    }
+  }
+
   if (resources.databases.length > 0) {
     const existingPostgresId = nextState.dokploy.postgresId || await provider.findPostgresId(environmentId);
     if (existingPostgresId && generatedInfraSecrets.postgres) {
@@ -220,7 +235,7 @@ export async function deploy(options = {}) {
   });
   persistFullState();
 
-  await provider.ensureDomains(composeId);
+  await provider.ensureDomains(composeId, resources);
   nextState.lastAttempt = releaseAttempt(release, { status: "triggering" });
   persistFullState();
 
@@ -537,6 +552,7 @@ function stateForSafeSave(state, generated, safeGenerated) {
   };
   if (generated.postgres && !safeGenerated.postgres) delete next.infra.postgres;
   if (generated.redis && !safeGenerated.redis) delete next.infra.redis;
+  if (generated.objectStorage && !safeGenerated.objectStorage) delete next.infra.objectStorage;
   if (Object.keys(next.infra).length === 0) delete next.infra;
   return next;
 }
@@ -752,6 +768,9 @@ function infraFromStateForEnvPush({ config, resources, state }) {
   if (resources.caches.length > 0 && !infra.redis?.password) {
     throw new Error("Missing local infrastructure state for NSTACK_REDIS_PASSWORD. Run `nstack pull` before `nstack env push`.");
   }
+  if (resources.buckets.length > 0 && (!infra.objectStorage?.accessKey || !infra.objectStorage?.secretKey)) {
+    throw new Error("Missing local infrastructure state for NSTACK_MINIO_SECRET_KEY. Run `nstack pull` before `nstack env push`.");
+  }
   return {
     postgres: {
       appName: infra.postgres?.appName || `${config.app.slug}-postgres`,
@@ -764,6 +783,14 @@ function infraFromStateForEnvPush({ config, resources, state }) {
       appName: infra.redis?.appName || `${config.app.slug}-redis`,
       host: infra.redis?.host || `${config.app.slug}-redis:6379`,
       password: infra.redis?.password || "",
+    },
+    objectStorage: {
+      appName: infra.objectStorage?.appName || `${config.app.slug}-minio`,
+      host: infra.objectStorage?.host || `${config.app.slug}-minio:9000`,
+      endpoint: infra.objectStorage?.endpoint || `http://${config.app.slug}-minio:9000`,
+      region: infra.objectStorage?.region || "us-east-1",
+      accessKey: infra.objectStorage?.accessKey || "",
+      secretKey: infra.objectStorage?.secretKey || "",
     },
   };
 }
@@ -1153,6 +1180,7 @@ function ensureInfraSecrets({ config, resources, state }) {
   const existing = state.infra || {};
   const postgresName = `${config.app.slug}-postgres`;
   const redisName = `${config.app.slug}-redis`;
+  const minioName = `${config.app.slug}-minio`;
   return {
     postgres: {
       appName: postgresName,
@@ -1165,6 +1193,14 @@ function ensureInfraSecrets({ config, resources, state }) {
       appName: redisName,
       host: existing.redis?.host || `${redisName}:6379`,
       password: existing.redis?.password || (resources.caches.length ? randomSecret(24) : ""),
+    },
+    objectStorage: {
+      appName: minioName,
+      host: existing.objectStorage?.host || `${minioName}:9000`,
+      endpoint: existing.objectStorage?.endpoint || `http://${minioName}:9000`,
+      region: existing.objectStorage?.region || "us-east-1",
+      accessKey: existing.objectStorage?.accessKey || (resources.buckets.length ? randomSecret(16) : ""),
+      secretKey: existing.objectStorage?.secretKey || (resources.buckets.length ? randomSecret(32) : ""),
     },
   };
 }
@@ -1449,7 +1485,7 @@ function printPlan({ config, resources, images, artifacts, release, infraFile, c
     console.log(`  build context: ${artifacts.build.context}`);
   }
   console.log(`  release: ${release.commit}`);
-  console.log(`  resources: services=${resources.services.length} dbs=${resources.databases.length} caches=${resources.caches.length} topics=${resources.topics.length} crons=${resources.crons.length}`);
+  console.log(`  resources: services=${resources.services.length} dbs=${resources.databases.length} caches=${resources.caches.length} topics=${resources.topics.length} buckets=${resources.buckets.length} crons=${resources.crons.length}`);
   console.log(`  wrote ${path.relative(process.cwd(), infraFile)}`);
   console.log(`  wrote ${path.relative(process.cwd(), composeFile)}`);
 }

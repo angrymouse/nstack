@@ -426,7 +426,9 @@ test("status compares Dokploy Compose env without exposing secret values", async
   mkdirSync(path.join(cwd, "backend", "api"), { recursive: true });
   writeFileSync(path.join(cwd, "nstack.config.mjs"), `export default { app: { name: "Env Drift", slug: "env-drift" } };\n`);
   writeFileSync(path.join(cwd, "backend", "api", "resources.ts"), `import { SQLDatabase } from "encore.dev/storage/sqldb";
+import { Bucket } from "encore.dev/storage/objects";
 export const db = new SQLDatabase("app", {});
+export const uploads = new Bucket("uploads", {});
 function secret(name) { return name; }
 export const apiSecret = secret("API_SECRET");
 `);
@@ -440,7 +442,13 @@ export const apiSecret = secret("API_SECRET");
   writeFileSync(path.join(cwd, ".nstack", "secrets.env"), "API_SECRET=local-secret\n");
   writeFileSync(path.join(cwd, ".nstack", "state.json"), JSON.stringify({
     dokploy: { composeId: "compose-1" },
-    infra: { postgres: { password: "local-postgres-password" } },
+    infra: {
+      postgres: { password: "local-postgres-password" },
+      objectStorage: {
+        accessKey: "local-minio-access",
+        secretKey: "local-minio-secret",
+      },
+    },
     lastRelease: { commit: "abc123", tag: "abc123", builtAt: "2026-06-17T00:00:00.000Z" },
   }));
 
@@ -464,6 +472,8 @@ export const apiSecret = secret("API_SECRET");
         env: [
           "API_SECRET=remote-secret",
           "NSTACK_POSTGRES_PASSWORD=remote-postgres-password",
+          "NSTACK_MINIO_ACCESS_KEY=remote-minio-access",
+          "NSTACK_MINIO_SECRET_KEY=remote-minio-secret",
           "",
         ].join("\n"),
       } });
@@ -496,12 +506,14 @@ export const apiSecret = secret("API_SECRET");
 
   const json = output.join("\n");
   assert.equal(report.drift.ok, false);
-  assert.deepEqual(report.remote.compose.envKeys, ["API_SECRET", "NSTACK_POSTGRES_PASSWORD"]);
-  assert.deepEqual(report.drift.expected.envKeys, ["API_SECRET", "NSTACK_POSTGRES_PASSWORD"]);
+  assert.deepEqual(report.remote.compose.envKeys, ["API_SECRET", "NSTACK_MINIO_ACCESS_KEY", "NSTACK_MINIO_SECRET_KEY", "NSTACK_POSTGRES_PASSWORD"]);
+  assert.deepEqual(report.drift.expected.envKeys, ["API_SECRET", "NSTACK_MINIO_ACCESS_KEY", "NSTACK_MINIO_SECRET_KEY", "NSTACK_POSTGRES_PASSWORD"]);
   assert.ok(report.drift.issues.includes("Dokploy environment key API_SECRET differs from local state."));
   assert.ok(report.drift.issues.includes("Dokploy environment key NSTACK_POSTGRES_PASSWORD differs from local state."));
+  assert.ok(report.drift.issues.includes("Dokploy environment key NSTACK_MINIO_ACCESS_KEY differs from local state."));
+  assert.ok(report.drift.issues.includes("Dokploy environment key NSTACK_MINIO_SECRET_KEY differs from local state."));
   assert.ok(report.nextSteps.includes("Run `nstack env push` to sync local app secrets to Dokploy and redeploy the current release."));
-  assert.doesNotMatch(json, /local-secret|remote-secret|local-postgres-password|remote-postgres-password/);
+  assert.doesNotMatch(json, /local-secret|remote-secret|local-postgres-password|remote-postgres-password|local-minio-access|local-minio-secret|remote-minio-access|remote-minio-secret/);
 });
 
 test("status tells users to pull when local generated infra state is missing", async () => {
@@ -510,7 +522,9 @@ test("status tells users to pull when local generated infra state is missing", a
   mkdirSync(path.join(cwd, "backend", "api"), { recursive: true });
   writeFileSync(path.join(cwd, "nstack.config.mjs"), `export default { app: { name: "Missing Infra", slug: "missing-infra" } };\n`);
   writeFileSync(path.join(cwd, "backend", "api", "resources.ts"), `import { SQLDatabase } from "encore.dev/storage/sqldb";
+import { Bucket } from "encore.dev/storage/objects";
 export const db = new SQLDatabase("app", {});
+export const uploads = new Bucket("uploads", {});
 `);
   writeFileSync(path.join(cwd, ".nstack", "local.env"), [
     "NSTACK_DOMAIN=missing-infra.example.test",
@@ -557,6 +571,7 @@ export const db = new SQLDatabase("app", {});
   }
 
   assert.ok(report.drift.issues.includes("Missing local infrastructure state for NSTACK_POSTGRES_PASSWORD; run `nstack pull` to recover it from Dokploy before deploying."));
+  assert.ok(report.drift.issues.includes("Missing local infrastructure state for NSTACK_MINIO_SECRET_KEY; run `nstack pull` to recover it from Dokploy before deploying."));
   assert.ok(report.nextSteps.includes("Run `nstack pull` to recover generated infrastructure secrets from Dokploy."));
   assert.doesNotMatch(statusCheckError(report).message, /run `nstack deploy`\./);
 });

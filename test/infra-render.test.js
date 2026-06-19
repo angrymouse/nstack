@@ -50,3 +50,42 @@ test("infra renderer uses app-specific NSQ hostnames for shared Dokploy hosts", 
   const infra = JSON.parse(output);
   assert.equal(infra.pubsub[0].hosts, "demo-nsqd:4150");
 });
+
+test("infra renderer maps Encore caches, buckets, and secrets to Dokploy-backed services", () => {
+  const output = renderEncoreInfra({
+    config: {
+      app: { slug: "demo", domain: "demo.example.test" },
+      deploy: { target: "prod" },
+    },
+    resources: {
+      services: [{ name: "api" }],
+      metadata: { gateways: [] },
+      databases: [],
+      topics: [],
+      caches: [{ name: "sessions" }, { name: "jobs" }],
+      buckets: [{ name: "uploads" }, { name: "public-assets", public: true }],
+      secrets: ["STRIPE_SECRET"],
+    },
+    infra: {
+      redis: { host: "demo-redis:6379" },
+      objectStorage: {
+        endpoint: "http://demo-minio:9000",
+        region: "us-east-1",
+      },
+    },
+  });
+
+  const infra = JSON.parse(output);
+  assert.deepEqual(infra.secrets, { STRIPE_SECRET: { $env: "STRIPE_SECRET" } });
+  assert.equal(infra.redis.sessions.host, "demo-redis:6379");
+  assert.equal(infra.redis.sessions.database_index, 0);
+  assert.equal(infra.redis.sessions.auth.type, "auth_string");
+  assert.deepEqual(infra.redis.sessions.auth.auth_string, { $env: "NSTACK_REDIS_PASSWORD" });
+  assert.equal(infra.redis.jobs.database_index, 1);
+  assert.equal(infra.object_storage[0].type, "s3");
+  assert.deepEqual(infra.object_storage[0].access_key_id, { $env: "NSTACK_MINIO_ACCESS_KEY" });
+  assert.deepEqual(infra.object_storage[0].secret_access_key, { $env: "NSTACK_MINIO_SECRET_KEY" });
+  assert.equal(infra.object_storage[0].endpoint, "http://demo-minio:9000");
+  assert.equal(infra.object_storage[0].buckets.uploads.name, "demo-uploads");
+  assert.equal(infra.object_storage[0].buckets["public-assets"].public_base_url, "https://demo.example.test/objects/demo-public-assets");
+});

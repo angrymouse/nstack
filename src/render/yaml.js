@@ -14,6 +14,7 @@ function renderObject(value, indent) {
   const pad = " ".repeat(indent);
   return entries.map(([key, item]) => {
     if (isScalar(item)) return `${pad}${renderKey(key)}: ${renderScalar(item)}`;
+    if (isEmptyObject(item)) return `${pad}${renderKey(key)}: {}`;
     return `${pad}${renderKey(key)}:\n${renderValue(item, indent + 2)}`;
   }).join("\n");
 }
@@ -40,4 +41,8 @@ function renderKey(value) {
 
 function isScalar(value) {
   return value === null || typeof value !== "object";
+}
+
+function isEmptyObject(value) {
+  return value && !Array.isArray(value) && typeof value === "object" && Object.keys(value).length === 0;
 }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { DokployProvider, ensureGiteaComposeWebhook } from "../src/providers/dokploy.js";
+import { DokployProvider, ensureGiteaComposeWebhook, expectedComposeDomains } from "../src/providers/dokploy.js";
 
 test("upsertCompose saves Compose env with Dokploy environment endpoint", async () => {
   const calls = [];
@@ -38,6 +38,18 @@ test("upsertCompose saves Compose env with Dokploy environment endpoint", async 
 
   const save = calls.find((call) => call.path === "/api/compose.saveEnvironment");
   assert.deepEqual(save.body, { composeId: "compose-1", env: "API_SECRET=one\n" });
+});
+
+test("expected Compose domains include MinIO route only for public buckets", () => {
+  const config = { app: { domain: "bucket.example.test" } };
+  assert.deepEqual(
+    expectedComposeDomains(config, "compose-1", { buckets: [{ name: "private" }] }).map((domain) => domain.path),
+    ["/", "/api"],
+  );
+  assert.deepEqual(
+    expectedComposeDomains(config, "compose-1", { buckets: [{ name: "public-assets", public: true }] }).map((domain) => `${domain.path}:${domain.serviceName}:${domain.port}:${domain.stripPath}`),
+    ["/:frontend:3000:false", "/api:backend:8080:true", "/objects:minio:9000:true"],
+  );
 });
 
 test("upsertCompose falls back to compose.update when saveEnvironment is unavailable", async () => {

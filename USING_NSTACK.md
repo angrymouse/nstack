@@ -19,6 +19,8 @@ The generated app stays ordinary:
 - Dokploy Domains/Traefik route traffic; nstack does not add Caddy or a proxy container.
 - Dokploy Compose builds and runs backend and frontend containers.
 - Dokploy native resources are used where they map to Encore resources.
+- Generated support services fill the remaining Encore primitives: NSQ for Pub/Sub and MinIO for object storage buckets.
+- Encore `secret()` values are pushed as Dokploy Compose environment variables, not committed into source.
 
 ## Zero To Production
 
@@ -346,6 +348,7 @@ During the first deploy, nstack will:
 - Generate Dokploy Compose.
 - Create or reuse the Dokploy project and environment.
 - Create or reuse managed Postgres or Redis when Encore resources require them.
+- Add generated support services for Encore Pub/Sub and object storage when required.
 - Create or update the Dokploy Compose app.
 - Save Compose environment values.
 - Create or update Dokploy Domains/Traefik routes.
@@ -539,9 +542,9 @@ On deploy, nstack can create or update:
 - A Dokploy Compose app.
 - Dokploy native Postgres when Encore declares SQL databases.
 - Dokploy native Redis when Encore declares cache resources.
-- Compose services for backend, frontend, and support services such as NSQ.
-- Domains/Traefik routes for frontend and API traffic.
-- Compose environment variables.
+- Compose services for backend, frontend, NSQ Pub/Sub, and MinIO object storage.
+- Domains/Traefik routes for frontend, API traffic, and public object buckets.
+- Compose environment variables for generated infrastructure credentials and Encore `secret()` values.
 - Dokploy schedules for Encore cron jobs.
 
 The generated Compose file is not meant to be hand-edited. Change source config, backend code, frontend code, or nstack config, then re-render or deploy.
@@ -618,7 +621,7 @@ Target files are independent, so production and staging keep separate local link
 
 ## Runtime Secrets
 
-App runtime secrets are separate from deploy credentials.
+App runtime secrets are separate from deploy credentials. When Encore declares `secret("NAME")`, nstack expects a `NAME` value and renders the Encore infra config to read it from the process environment. Deploy and `nstack env push` save those values into Dokploy Compose environment variables without printing them.
 
 Set a secret:
 
@@ -786,7 +789,7 @@ nstack pull
 nstack status
 ```
 
-`nstack pull` hydrates known Dokploy IDs, infrastructure secrets, schedules, and remote app env. It preserves local secret values unless you explicitly force replacement.
+`nstack pull` hydrates known Dokploy IDs, generated infrastructure secrets for Postgres, Redis, and MinIO, schedules, and remote app env. It preserves local secret values unless you explicitly force replacement. `nstack env pull --all` still filters generated `NSTACK_*` infrastructure keys out of `.nstack/secrets.env`.
 
 ## Performance Notes
 
@@ -859,7 +862,7 @@ Common issues:
 - Missing repository in Compose mode: run `nstack configure --repository <git-url>`.
 - Dokploy cannot build latest code: commit and push the source, then deploy again.
 - Domain verification fails: check DNS, Dokploy Domains, and `nstack status`.
-- Backend cannot reach Postgres or Redis: run `nstack status --json` and check generated env against Dokploy Compose env.
+- Backend cannot reach Postgres, Redis, or object storage: run `nstack status --json` and check generated env against Dokploy Compose env.
 - A deploy is active too long: run `nstack logs --follow`, then `nstack cancel` if needed.
 - A deploy failed after triggering: run `nstack logs`, then `nstack redeploy` or `nstack rollback`.
 - Local state is stale: run `nstack pull`, then `nstack status`.
