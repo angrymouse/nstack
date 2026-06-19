@@ -38,8 +38,8 @@ import { ensureDir, fileExists, randomSecret, run, commandOutput, writeText, mer
 const releaseManifestName = "release.json";
 const releaseManifestSchema = "nstack.release.v1";
 const maxReleaseHistory = 20;
-const defaultValidationPollMs = 250;
-const maxValidationPollMs = 1000;
+const defaultValidationPollMs = 100;
+const maxValidationPollMs = 500;
 const defaultEndpointRequestTimeoutMs = 2000;
 
 export async function configure(options = {}) {
