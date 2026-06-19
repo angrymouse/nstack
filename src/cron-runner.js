@@ -4,7 +4,7 @@ import { ensureDir, writeText } from "./util.js";
 
 export const CRON_RUNNER_SOURCE_PATH = "encore.gen/internal/entrypoints/combined/nstack-cron-runner.ts";
 export const CRON_RUNNER_OUT_DIR = ".encore/nstack/cron-runner";
-export const CRON_RUNNER_BUNDLE_PATH = `${CRON_RUNNER_OUT_DIR}/encore.gen/internal/entrypoints/combined/nstack-cron-runner.mjs`;
+export const CRON_RUNNER_BUNDLE_PATH = `${CRON_RUNNER_OUT_DIR}/combined/nstack-cron-runner.mjs`;
 
 export function writeCronRunnerSource({
   backendDir,
