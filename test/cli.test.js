@@ -246,7 +246,7 @@ test("verify --json reports endpoint checks and prefers the latest attempted rel
   assert.doesNotMatch(output.join("\n"), /Verified/);
 });
 
-test("verify accepts source-backed runtime ref labels while preserving release sha", async () => {
+test("verify checks source-backed runtime commit sha", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "nstack-verify-source-"));
   mkdirSync(path.join(cwd, ".nstack"), { recursive: true });
   writeFileSync(path.join(cwd, "nstack.config.mjs"), `export default {
@@ -279,7 +279,7 @@ test("verify accepts source-backed runtime ref labels while preserving release s
   try {
     globalThis.fetch = async (url) => {
       assert.equal(url, "https://verify-source.example.test/api/status");
-      return new Response("running acme/verify-source@main", { status: 200 });
+      return new Response("running 1234567890abcdef1234567890abcdef12345678", { status: 200 });
     };
     console.log = (line = "") => output.push(String(line));
 
@@ -292,6 +292,6 @@ test("verify accepts source-backed runtime ref labels while preserving release s
 
   const report = JSON.parse(output.join("\n"));
   assert.equal(report.release.commit, "1234567890abcdef1234567890abcdef12345678");
-  assert.equal(report.endpoints[0].expectedCommit, "acme/verify-source@main");
+  assert.equal(report.endpoints[0].expectedCommit, "1234567890abcdef1234567890abcdef12345678");
   assert.equal(report.endpoints[0].ok, true);
 });

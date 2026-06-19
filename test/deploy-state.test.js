@@ -956,6 +956,12 @@ test("deploy configures Gitea source-backed Compose apps for push deployments", 
   writeFileSync(path.join(cwd, "backend", "api", "status.ts"), `export const ok = true;\n`);
   writeFileSync(path.join(cwd, "backend", "Dockerfile"), "FROM scratch\n");
   writeFileSync(path.join(cwd, "frontend", "Dockerfile"), "FROM scratch\n");
+  execFileSync("git", ["init"], { cwd, stdio: "ignore" });
+  execFileSync("git", ["config", "user.email", "nstack@example.test"], { cwd });
+  execFileSync("git", ["config", "user.name", "nstack"], { cwd });
+  execFileSync("git", ["add", "."], { cwd });
+  execFileSync("git", ["commit", "-m", "source push"], { cwd, stdio: "ignore" });
+  const currentCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8" }).trim();
 
   const envKeys = ["NSTACK_DOMAIN", "DOKPLOY_URL", "DOKPLOY_API_KEY"];
   const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
@@ -1032,7 +1038,7 @@ test("deploy configures Gitea source-backed Compose apps for push deployments", 
     return [line.slice(0, index), line.slice(index + 1)];
   }));
   assert.equal(env.NSTACK_BUILD_CONTEXT, "../..");
-  assert.equal(env.NSTACK_GIT_COMMIT, "acme/source-push@feature/push-deploy");
+  assert.equal(env.NSTACK_GIT_COMMIT, currentCommit);
   assert.equal(env.NSTACK_IMAGE_TAG, "source-feature-push-deploy");
 });
 
@@ -1534,9 +1540,8 @@ test("wait for source-backed apps gates validation on the pushed Dokploy deploym
     const parsed = new URL(String(url));
     if (parsed.hostname === "wait-source.example.test") {
       publicCalls += 1;
-      assert.equal(matchingDeploymentDone, true);
       assert.equal(parsed.pathname, "/api/status");
-      return new Response("running acme/wait-source@main", { status: 200 });
+      return new Response(matchingDeploymentDone ? `running ${currentCommit}` : "running oldcommit", { status: 200 });
     }
     const endpoint = parsed.pathname.replace(/^\/api\/(?:trpc\/)?/, "");
     if (endpoint === "deployment.allByCompose") {
@@ -1589,8 +1594,8 @@ test("wait for source-backed apps gates validation on the pushed Dokploy deploym
     }
   }
 
-  assert.equal(publicCalls, 1);
-  assert.equal(deploymentPolls, 4);
+  assert.ok(publicCalls >= 2);
+  assert.ok(deploymentPolls >= 3);
   const report = JSON.parse(output.join("\n"));
   assert.equal(report.release.commit, currentCommit);
 });

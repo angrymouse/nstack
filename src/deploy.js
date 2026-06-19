@@ -593,16 +593,25 @@ async function runReleaseChecks(cwd, config, release, options = {}) {
   let deployment = null;
   let publicReport = null;
   let statusReport = null;
-  if (!options.skipStatus) {
-    deployment = await timedAsync("dokploy: wait deployment", true, timings, () => waitForDokployDeployment(cwd, config, release, {
+  const waitForDeploymentTask = (signal) => timedAsync("dokploy: wait deployment", true, timings, () => waitForDokployDeployment(cwd, config, release, {
       requireMatch: options.requireDeploymentMatch,
       timeoutMs: options.statusTimeoutMs || options.timeoutMs,
       intervalMs: options.statusIntervalMs || options.intervalMs,
+      signal,
     }));
-  }
-  if (!options.skipVerify) {
-    publicReport = await timedAsync("verify: public endpoints", true, timings, () =>
-      verify({ config, release, quiet: options.json, intervalMs: options.verifyIntervalMs || options.statusIntervalMs || options.intervalMs }));
+  const verifyTask = (signal) => timedAsync("verify: public endpoints", true, timings, () =>
+    verify({ config, release, cwd, quiet: options.json, intervalMs: options.verifyIntervalMs || options.statusIntervalMs || options.intervalMs, signal }));
+
+  if (!options.skipStatus && !options.skipVerify) {
+    const results = await runConcurrentReleaseTasks({
+      deployment: waitForDeploymentTask,
+      publicReport: verifyTask,
+    });
+    deployment = results.deployment;
+    publicReport = results.publicReport;
+  } else {
+    if (!options.skipStatus) deployment = await waitForDeploymentTask();
+    if (!options.skipVerify) publicReport = await verifyTask();
   }
   if (!options.skipStatus) {
     statusReport = await timedAsync("dokploy: status audit", true, timings, () => auditPostDeployStatus(cwd, {
@@ -614,6 +623,25 @@ async function runReleaseChecks(cwd, config, release, options = {}) {
     }));
   }
   return { deployment, publicReport, statusReport, timings };
+}
+
+async function runConcurrentReleaseTasks(tasks) {
+  const controller = new AbortController();
+  let firstError = null;
+  const entries = Object.entries(tasks);
+  const settled = await Promise.allSettled(entries.map(async ([key, task]) => {
+    try {
+      return [key, await task(controller.signal)];
+    } catch (error) {
+      if (!firstError) {
+        firstError = error;
+        controller.abort(error);
+      }
+      throw error;
+    }
+  }));
+  if (firstError) throw firstError;
+  return Object.fromEntries(settled.map((result) => result.value));
 }
 
 function assertWaitCanPromote(options = {}) {
@@ -809,8 +837,31 @@ function validationPollDelay(poll, baseIntervalMs = defaultValidationPollMs) {
   return Math.min(maxValidationPollMs, base * multiplier);
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function abortError(signal) {
+  if (signal?.reason instanceof Error) return signal.reason;
+  const error = new Error("Operation aborted.");
+  error.name = "AbortError";
+  return error;
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw abortError(signal);
+}
+
+function sleep(ms, signal) {
+  if (!signal) return new Promise((resolve) => setTimeout(resolve, ms));
+  throwIfAborted(signal);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(abortError(signal));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 async function waitForDokployDeployment(cwd, config, release, options = {}) {
@@ -829,6 +880,7 @@ async function waitForDokployDeployment(cwd, config, release, options = {}) {
   let poll = 0;
 
   for (;;) {
+    throwIfAborted(options.signal);
     try {
       lastDeployments = await provider.listComposeDeployments(composeId);
       const relevant = deploymentForRelease(lastDeployments, release);
@@ -850,7 +902,7 @@ async function waitForDokployDeployment(cwd, config, release, options = {}) {
     if (remaining <= 0) {
       throw deploymentWaitTimeoutError({ release, deployments: lastDeployments, error: lastError });
     }
-    await sleep(Math.min(validationPollDelay(poll++, baseIntervalMs), remaining));
+    await sleep(Math.min(validationPollDelay(poll++, baseIntervalMs), remaining), options.signal);
   }
 }
 
@@ -1082,7 +1134,7 @@ function normalizeGitRepositoryUrl(value) {
   return `https://${ssh[1]}/${ssh[2]}`;
 }
 
-export async function verify({ config = null, release = null, cwd = process.cwd(), target = "", quiet = false, json = false, intervalMs = defaultValidationPollMs } = {}) {
+export async function verify({ config = null, release = null, cwd = process.cwd(), target = "", quiet = false, json = false, intervalMs = defaultValidationPollMs, signal = null } = {}) {
   const loadedConfig = config || await loadConfig(cwd, { target });
   const state = loadState(cwd, loadedConfig.deploy.target);
   const loadedRelease = release || state.lastAttempt || state.lastRelease || releaseInfo(loadedConfig, cwd);
@@ -1092,9 +1144,11 @@ export async function verify({ config = null, release = null, cwd = process.cwd(
   let report = null;
   let poll = 0;
   for (;;) {
+    throwIfAborted(signal);
     report = await verifyReport(loadedConfig, loadedRelease, base, {
       expectedCommit,
       requestTimeoutMs: loadedConfig.verify.requestTimeoutMs,
+      signal,
     });
     if (report.ok) {
       if (json && !quiet) console.log(JSON.stringify(report, null, 2));
@@ -1103,7 +1157,7 @@ export async function verify({ config = null, release = null, cwd = process.cwd(
     }
     const remaining = deadline - Date.now();
     if (remaining <= 0) break;
-    await sleep(Math.min(validationPollDelay(poll++, intervalMs), remaining));
+    await sleep(Math.min(validationPollDelay(poll++, intervalMs), remaining), signal);
   }
   if (json && !quiet) console.log(JSON.stringify(report, null, 2));
   throw verifyReportError(report, base);
@@ -1152,7 +1206,7 @@ async function verifyEndpoint(base, endpoint, release, options = {}) {
     error: null,
   };
   try {
-    const response = await fetch(url, fetchOptionsForTimeout(requestTimeoutMs));
+    const response = await fetch(url, fetchOptionsForTimeout(requestTimeoutMs, options.signal));
     result.status = response.status;
     if (response.status !== expectStatus) {
       result.error = `${name} returned HTTP ${response.status}`;
@@ -1177,15 +1231,23 @@ async function verifyEndpoint(base, endpoint, release, options = {}) {
   }
 }
 
-function fetchOptionsForTimeout(requestTimeoutMs) {
-  if (!(requestTimeoutMs > 0)) return {};
-  if (typeof AbortSignal === "undefined" || typeof AbortSignal.timeout !== "function") return {};
-  return { signal: AbortSignal.timeout(requestTimeoutMs) };
+function fetchOptionsForTimeout(requestTimeoutMs, signal = null) {
+  const signals = [];
+  if (signal) signals.push(signal);
+  if (requestTimeoutMs > 0 && typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+    signals.push(AbortSignal.timeout(requestTimeoutMs));
+  }
+  if (signals.length === 0) return {};
+  if (signals.length === 1) return { signal: signals[0] };
+  if (typeof AbortSignal !== "undefined" && typeof AbortSignal.any === "function") {
+    return { signal: AbortSignal.any(signals) };
+  }
+  return { signal: signals[0] };
 }
 
 function expectedVerifyCommit(config, release) {
   if (!release?.commit) return "";
-  if (isSourceBackedCompose(config)) {
+  if (isSourceBackedCompose(config) && release.commit === "local") {
     return sourceRefLabelForConfig(config.deploy.source) || release.commit;
   }
   return release.commit;
@@ -1360,7 +1422,7 @@ function composeBuildValues({ config, release, infraText, source = null }) {
     NSTACK_BUILD_CONTEXT: sourceBacked
       ? "../.."
       : sourceBuildContextForEnv(config, release),
-    NSTACK_GIT_COMMIT: sourceBacked ? sourceRefLabel(source) : release.commit,
+    NSTACK_GIT_COMMIT: sourceBacked ? sourceCommitValue(source, release) : release.commit,
     NSTACK_IMAGE_TAG: sourceBacked ? sourceImageTag(source) : release.tag,
   };
 }
@@ -1378,6 +1440,11 @@ function sourceBuildContextForEnv(config, release) {
 function sourceRefLabel(source) {
   return source.refLabel || ([source.owner, source.repository].filter(Boolean).join("/")
     + (source.branch ? `@${source.branch}` : ""));
+}
+
+function sourceCommitValue(source, release) {
+  if (release?.commit && release.commit !== "local") return release.commit;
+  return sourceRefLabel(source) || release?.commit || "local";
 }
 
 function sourceImageTag(source) {
@@ -1533,7 +1600,7 @@ function timed(label, quiet, timings, task) {
   const startedAt = performance.now();
   const result = task();
   const durationMs = performance.now() - startedAt;
-  if (timings) timings.push({ name: label, ms: Math.round(durationMs) });
+  if (timings) timings.push({ name: label, ms: Math.round(durationMs), startedAt, endedAt: startedAt + durationMs });
   if (!quiet) console.log(`${label}: ${(durationMs / 1000).toFixed(2)}s`);
   return result;
 }
@@ -1542,19 +1609,25 @@ async function timedAsync(label, quiet, timings, task) {
   const startedAt = performance.now();
   const result = await task();
   const durationMs = performance.now() - startedAt;
-  if (timings) timings.push({ name: label, ms: Math.round(durationMs) });
+  if (timings) timings.push({ name: label, ms: Math.round(durationMs), startedAt, endedAt: startedAt + durationMs });
   if (!quiet) console.log(`${label}: ${(durationMs / 1000).toFixed(2)}s`);
   return result;
 }
 
 function summarizeTimings(timings) {
-  const steps = timings.map((entry) => ({
+  const ordered = timings.slice().sort((a, b) => (a.startedAt || 0) - (b.startedAt || 0));
+  const steps = ordered.map((entry) => ({
     name: entry.name,
     ms: entry.ms,
     seconds: Number((entry.ms / 1000).toFixed(3)),
   }));
+  const wallStartedAt = Math.min(...ordered.map((entry) => entry.startedAt).filter(Number.isFinite));
+  const wallEndedAt = Math.max(...ordered.map((entry) => entry.endedAt).filter(Number.isFinite));
+  const totalMs = Number.isFinite(wallStartedAt) && Number.isFinite(wallEndedAt)
+    ? Math.round(wallEndedAt - wallStartedAt)
+    : steps.reduce((sum, entry) => sum + entry.ms, 0);
   return {
-    total_ms: steps.reduce((sum, entry) => sum + entry.ms, 0),
+    total_ms: totalMs,
     steps,
   };
 }
