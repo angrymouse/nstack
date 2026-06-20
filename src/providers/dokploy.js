@@ -86,26 +86,43 @@ export class DokployProvider {
 
   async ensureProject() {
     const name = this.config.deploy.provider.projectName;
-    if (this.state.dokploy?.projectId) return this.state.dokploy.projectId;
-    const existing = await this.findProjectByName(name);
-    if (existing) return existing;
+    const projects = await this.listProjects();
+    const stateId = this.state.dokploy?.projectId || "";
+    if (stateId) {
+      const stateProject = projects.find((item) => resourceIdOf(item, ["projectId", "id"]) === stateId);
+      if (stateProject?.name === name) return stateId;
+    }
+    const existing = projects.find((item) => item?.name === name);
+    if (existing) return resourceIdOf(existing, ["projectId", "id"]);
     const created = await this.client.apiPost("project.create", { name, description: "Managed by nstack" });
-    return idOf(created, ["projectId", "id"]) || await this.findProjectByName(name);
+    const createdId = resourceIdOf(created, ["projectId", "id"]);
+    if (createdId) return createdId;
+    const resolved = await this.findProjectByName(name);
+    if (resolved) return resolved;
+    throw new Error(`Dokploy project ${name} could not be created or resolved.`);
   }
 
   async ensureEnvironment(projectId) {
     const name = this.config.deploy.provider.environmentName;
-    if (this.state.dokploy?.environmentId) return this.state.dokploy.environmentId;
-    const existing = await this.findEnvironmentByName(projectId, name);
-    if (existing) return existing;
+    const environments = await this.listProjectEnvironments(projectId);
+    const stateId = this.state.dokploy?.environmentId || "";
+    if (stateId) {
+      const stateEnvironment = environments.find((item) => resourceIdOf(item, ["environmentId", "id"]) === stateId);
+      if (stateEnvironment?.name === name) return stateId;
+    }
+    const existing = environments.find((item) => item?.name === name);
+    if (existing) return resourceIdOf(existing, ["environmentId", "id"]);
     const created = await this.client.apiPost("environment.create", { name, projectId, description: "Managed by nstack" });
-    return idOf(created, ["environmentId", "id"]) || await this.findEnvironmentByName(projectId, name);
+    const createdId = resourceIdOf(created, ["environmentId", "id"]);
+    if (createdId) return createdId;
+    const resolved = await this.findEnvironmentByName(projectId, name);
+    if (resolved) return resolved;
+    throw new Error(`Dokploy environment ${name} could not be created or resolved in project ${this.config.deploy.provider.projectName}.`);
   }
 
   async ensurePostgres(environmentId, infra, options = {}) {
     const name = `${this.config.app.slug}-postgres`;
-    if (this.state.dokploy?.postgresId) return this.state.dokploy.postgresId;
-    const existing = await this.findPostgresId(environmentId);
+    const existing = await this.resolvePostgresId(environmentId);
     if (existing) {
       if (options.passwordGenerated) throw existingInfraSecretError("Postgres", name, "NSTACK_POSTGRES_PASSWORD");
       return existing;
@@ -122,7 +139,7 @@ export class DokployProvider {
       ...serverPart(this.config),
     };
     const created = await this.client.apiPost("postgres.create", payload);
-    const id = idOf(created, ["postgresId", "id"]);
+    const id = resourceIdOf(created, ["postgresId", "id"]);
     if (id) await this.client.apiPost("postgres.deploy", { postgresId: id });
     return id;
   }
@@ -140,8 +157,7 @@ export class DokployProvider {
 
   async ensureRedis(environmentId, infra, options = {}) {
     const name = `${this.config.app.slug}-redis`;
-    if (this.state.dokploy?.redisId) return this.state.dokploy.redisId;
-    const existing = await this.findRedisId(environmentId);
+    const existing = await this.resolveRedisId(environmentId);
     if (existing) {
       if (options.passwordGenerated) throw existingInfraSecretError("Redis", name, "NSTACK_REDIS_PASSWORD");
       return existing;
@@ -155,7 +171,7 @@ export class DokployProvider {
       description: "Managed by nstack (Dragonfly Redis-compatible cache)",
       ...serverPart(this.config),
     });
-    const id = idOf(created, ["redisId", "id"]);
+    const id = resourceIdOf(created, ["redisId", "id"]);
     if (id) {
       const redis = await this.client.apiGet("redis.one", { redisId: id }).catch(() => null);
       const appName = redis?.appName || name;
@@ -185,15 +201,8 @@ export class DokployProvider {
 
   async upsertCompose(environmentId, composeFile, env = "", options = {}) {
     const name = `${this.config.app.slug}-app`;
-    const stateId = this.state.dokploy?.composeId;
     const source = options.source || null;
-    if (stateId) {
-      await this.updateComposeFile(environmentId, stateId, composeFile, source);
-      await this.saveComposeEnvironment(stateId, env);
-      await this.ensureSourceWebhook(stateId, source);
-      return stateId;
-    }
-    const existing = await this.findByName("compose.search", { environmentId, name, limit: 50 }, name, ["composeId", "id"]);
+    const existing = await this.resolveComposeId(environmentId);
     if (existing) {
       await this.updateComposeFile(environmentId, existing, composeFile, source);
       await this.saveComposeEnvironment(existing, env);
@@ -209,7 +218,7 @@ export class DokployProvider {
       sourceType: "raw",
       ...serverPart(this.config),
     });
-    const composeId = idOf(created, ["composeId", "id"]);
+    const composeId = resourceIdOf(created, ["composeId", "id"]);
     if (!composeId) throw new Error(`Dokploy compose.create did not return a compose id: ${JSON.stringify(created)}`);
     await this.updateComposeFile(environmentId, composeId, composeFile, source);
     await this.saveComposeEnvironment(composeId, env);
@@ -275,6 +284,8 @@ export class DokployProvider {
   async validateAppDomain() {
     const domain = this.config.app.domain || "";
     if (!domain) throw new Error("App domain is required before Dokploy DNS validation.");
+    const mode = this.config.deploy?.dnsValidation || "warn";
+    if (mode === "skip") return { domain, valid: true, skipped: true };
     const serverIp = await this.domainValidationServerIp();
     const result = await this.client.apiPost("domain.validateDomain", {
       domain,
@@ -284,7 +295,10 @@ export class DokployProvider {
     if (!report.valid) {
       const expected = report.expectedIp || "the Dokploy server";
       const resolved = report.resolvedIp || "(unresolved)";
-      throw new Error(`DNS for ${domain} resolves to ${resolved}, expected ${expected}. Point the domain at Dokploy before deploying.`);
+      const warning = `DNS for ${domain} resolves to ${resolved}, expected ${expected}. Point the domain at Dokploy before deploying.`;
+      if (mode === "block") throw new Error(warning);
+      console.warn(`Warning: ${warning}`);
+      return { ...report, warning };
     }
     return report;
   }
@@ -607,15 +621,47 @@ export class DokployProvider {
   }
 
   async findProjectByName(name) {
-    const found = asList(await this.client.apiGet("project.all"))
+    const found = (await this.listProjects())
       .find((item) => item?.name === name);
-    return found ? idOf(found, ["projectId", "id"]) : "";
+    return found ? resourceIdOf(found, ["projectId", "id"]) : "";
   }
 
   async findEnvironmentByName(projectId, name) {
-    const found = asList(await this.client.apiGet("environment.byProjectId", { projectId }))
+    const found = (await this.listProjectEnvironments(projectId))
       .find((item) => item?.name === name);
-    return found ? idOf(found, ["environmentId", "id"]) : "";
+    return found ? resourceIdOf(found, ["environmentId", "id"]) : "";
+  }
+
+  async listProjects() {
+    return asList(await this.client.apiGet("project.all"));
+  }
+
+  async listProjectEnvironments(projectId) {
+    return asList(await this.client.apiGet("environment.byProjectId", { projectId }));
+  }
+
+  async resolveComposeId(environmentId) {
+    return await this.resolveStateResourceId("composeId", "compose.one", "composeId", ["composeId", "id"])
+      || await this.findComposeId(environmentId);
+  }
+
+  async resolvePostgresId(environmentId) {
+    return await this.resolveStateResourceId("postgresId", "postgres.one", "postgresId", ["postgresId", "id"])
+      || await this.findPostgresId(environmentId);
+  }
+
+  async resolveRedisId(environmentId) {
+    return await this.resolveStateResourceId("redisId", "redis.one", "redisId", ["redisId", "id"])
+      || await this.findRedisId(environmentId);
+  }
+
+  async resolveStateResourceId(stateKey, endpoint, paramName, idNames) {
+    const stateId = this.state.dokploy?.[stateKey] || "";
+    if (!stateId) return "";
+    const value = await ignoreNotFound(() => this.client.apiGet(endpoint, { [paramName]: stateId }), null);
+    if (!value || (typeof value === "object" && Object.keys(value).length === 0)) return "";
+    const returnedId = resourceIdOf(value, idNames);
+    return !returnedId || returnedId === stateId ? stateId : "";
   }
 
   async findPostgresId(environmentId) {
@@ -636,12 +682,22 @@ export class DokployProvider {
   async findByName(endpoint, params, name, idNames) {
     const found = asList(await this.client.trpcGet(endpoint, params))
       .find((item) => item?.name === name || item?.appName === name);
-    return found ? idOf(found, idNames) : "";
+    return found ? resourceIdOf(found, idNames) : "";
   }
 }
 
 function serverPart(config) {
   return config.deploy.provider.serverId ? { serverId: config.deploy.provider.serverId } : {};
+}
+
+function resourceIdOf(value, names) {
+  const direct = idOf(value, names);
+  if (direct) return direct;
+  for (const key of ["data", "project", "environment", "postgres", "redis", "compose", "schedule", "domain"]) {
+    const nested = idOf(value?.[key], names);
+    if (nested) return nested;
+  }
+  return "";
 }
 
 function composeSourcePayload(source = null) {
@@ -724,22 +780,33 @@ export async function ensureGiteaComposeWebhook({ dokployUrl, compose, source })
   const hookUrl = `${String(dokployUrl || "").replace(/\/+$/, "")}/api/deploy/compose/${refreshToken}`;
   const repoPath = `${encodeURIComponent(source.owner)}/${encodeURIComponent(source.repository)}`;
   const apiBase = String(giteaUrl).replace(/\/+$/, "");
-  const hooks = await giteaRequest(apiBase, token, `/api/v1/repos/${repoPath}/hooks`, { method: "GET" });
+  let hooks;
+  try {
+    hooks = await giteaRequest(apiBase, token, `/api/v1/repos/${repoPath}/hooks`, { method: "GET" });
+  } catch (error) {
+    if (isGiteaRepositoryNotFound(error)) throw giteaRepositoryUnavailableError({ apiBase, source, cause: error });
+    throw error;
+  }
   const existing = asList(hooks).find((hook) => giteaHookUrl(hook) === hookUrl);
   if (existing) return { created: false, hookUrl };
 
-  await giteaRequest(apiBase, token, `/api/v1/repos/${repoPath}/hooks`, {
-    method: "POST",
-    body: {
-      type: "gitea",
-      config: {
-        url: hookUrl,
-        content_type: "json",
+  try {
+    await giteaRequest(apiBase, token, `/api/v1/repos/${repoPath}/hooks`, {
+      method: "POST",
+      body: {
+        type: "gitea",
+        config: {
+          url: hookUrl,
+          content_type: "json",
+        },
+        events: ["push"],
+        active: true,
       },
-      events: ["push"],
-      active: true,
-    },
-  });
+    });
+  } catch (error) {
+    if (isGiteaRepositoryNotFound(error)) throw giteaRepositoryUnavailableError({ apiBase, source, cause: error });
+    throw error;
+  }
   return { created: true, hookUrl };
 }
 
@@ -761,9 +828,35 @@ async function giteaRequest(apiBase, token, path, { method = "GET", body = null 
     // keep text response
   }
   if (!response.ok) {
-    throw new Error(`Gitea ${method} ${path} failed: ${response.status} ${typeof value === "string" ? value : JSON.stringify(value)}`);
+    const error = new Error(`Gitea ${method} ${path} failed: ${response.status} ${typeof value === "string" ? value : JSON.stringify(value)}`);
+    error.status = response.status;
+    error.method = method;
+    error.path = path;
+    error.body = value;
+    throw error;
   }
   return value;
+}
+
+function isGiteaRepositoryNotFound(error) {
+  return error?.status === 404 && /^\/api\/v1\/repos\/[^/]+\/[^/]+\/hooks$/.test(error.path || "");
+}
+
+function giteaRepositoryUnavailableError({ apiBase, source, cause }) {
+  const owner = source.owner || "<owner>";
+  const repository = source.repository || "<repo>";
+  const branch = source.branch || "main";
+  const repoUrl = `${apiBase}/${owner}/${repository}.git`;
+  return new Error([
+    `Gitea repository ${owner}/${repository} was not found or is not accessible to the Dokploy Gitea provider.`,
+    "Create a private repository in Gitea/Forgejo and push this app before deploying:",
+    `  git remote add origin ${repoUrl}`,
+    "  git add .",
+    "  git commit -m \"init\"",
+    `  git push -u origin ${branch}`,
+    "",
+    "If the repository already exists, reconnect the Gitea provider in Dokploy or rerun `nstack configure --repository <git-url>` with a repository the provider can access.",
+  ].join("\n"), { cause });
 }
 
 function giteaHookUrl(hook) {

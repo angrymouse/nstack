@@ -43,8 +43,10 @@ test("validateAppDomain uses Dokploy DNS validation with the current server IP",
   assert.deepEqual(validate.body, { domain: "dns.example.test", serverIp: "203.0.113.10" });
 });
 
-test("validateAppDomain rejects domains that do not point at Dokploy", async () => {
+test("validateAppDomain warns when domains do not point at Dokploy", async () => {
   const originalFetch = globalThis.fetch;
+  const originalWarn = console.warn;
+  const warnings = [];
   globalThis.fetch = async (url, init = {}) => {
     const parsed = new URL(String(url));
 
@@ -58,6 +60,7 @@ test("validateAppDomain rejects domains that do not point at Dokploy", async () 
   };
 
   try {
+    console.warn = (message = "") => warnings.push(String(message));
     const provider = new DokployProvider({
       config: {
         app: { slug: "dns-app", domain: "dns.example.test" },
@@ -66,12 +69,60 @@ test("validateAppDomain rejects domains that do not point at Dokploy", async () 
       state: {},
     });
 
+    const report = await provider.validateAppDomain();
+    assert.deepEqual(report, {
+      domain: "dns.example.test",
+      valid: false,
+      resolvedIp: "198.51.100.20",
+      expectedIp: "203.0.113.10",
+      warning: "DNS for dns.example.test resolves to 198.51.100.20, expected 203.0.113.10. Point the domain at Dokploy before deploying.",
+    });
+    assert.deepEqual(warnings, [
+      "Warning: DNS for dns.example.test resolves to 198.51.100.20, expected 203.0.113.10. Point the domain at Dokploy before deploying.",
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    console.warn = originalWarn;
+  }
+});
+
+test("validateAppDomain can block when DNS validation is strict", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalWarn = console.warn;
+  const warnings = [];
+  globalThis.fetch = async (url, init = {}) => {
+    const parsed = new URL(String(url));
+
+    if (init.method === "GET" && parsed.pathname === "/api/settings.getIp") {
+      return Response.json({ json: "203.0.113.10" });
+    }
+    if (init.method === "POST" && parsed.pathname === "/api/domain.validateDomain") {
+      return Response.json({ json: { isValid: false, resolvedIp: "198.51.100.20" } });
+    }
+    return Response.json({ json: {} });
+  };
+
+  try {
+    console.warn = (message = "") => warnings.push(String(message));
+    const provider = new DokployProvider({
+      config: {
+        app: { slug: "dns-app", domain: "dns.example.test" },
+        deploy: {
+          dnsValidation: "block",
+          provider: { url: "https://dokploy.example.test", apiKey: "dummy" },
+        },
+      },
+      state: {},
+    });
+
     await assert.rejects(
       provider.validateAppDomain(),
       /DNS for dns\.example\.test resolves to 198\.51\.100\.20, expected 203\.0\.113\.10/,
     );
+    assert.deepEqual(warnings, []);
   } finally {
     globalThis.fetch = originalFetch;
+    console.warn = originalWarn;
   }
 });
 

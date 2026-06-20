@@ -184,7 +184,7 @@ Use HTTPS for ongoing production use.
 
 ### 6. Create A Git Repository
 
-Create an empty repository for the app, then copy its URL. The Dokploy server must be able to fetch it.
+Create an empty private repository for the app, then copy its URL. The Dokploy server must be able to fetch it.
 
 For provider-backed deploy-on-push, connect the matching Git provider in Dokploy before the first deploy. nstack can configure Dokploy Compose source deployments for:
 
@@ -193,7 +193,7 @@ For provider-backed deploy-on-push, connect the matching Git provider in Dokploy
 - Bitbucket repositories when Dokploy has a Bitbucket provider connected.
 - Gitea or Forgejo repositories when Dokploy has a Gitea provider connected.
 
-For a public repository, an HTTPS URL is usually enough for source builds:
+Public repositories work too; for those, an HTTPS URL is usually enough for source builds:
 
 ```text
 https://github.com/acme/my-app.git
@@ -203,28 +203,32 @@ For private repositories and automatic push deploys, prefer the native Dokploy p
 
 ### 7. Scaffold The App
 
-Create the app and install dependencies:
+Create the app:
 
 ```sh
 nstack init my-app
 cd my-app
-pnpm install
 ```
 
-Interactive `nstack init` asks whether to set up Dokploy deployment now. If you say yes, it asks for the app domain, Dokploy URL, and API key, then lists the Git providers already connected in Dokploy. Pick the matching provider, or choose manual Git configuration for a new/custom source.
+Interactive `nstack init` asks whether to set up Dokploy deployment now. If you say yes, it asks for the app domain, then lets you pick a saved Dokploy instance or choose `Add new` to save a URL and API key for later projects. It then lists the Git providers already connected in Dokploy. Pick the matching provider, or choose manual Git configuration for a new/custom source.
+
+Init asks which package manager to use, with pnpm as the default when it is available. The Encore + Nuxt template currently supports pnpm. You can let nstack remember pnpm as the default for future projects, or pass `--package-manager pnpm` / set `NSTACK_PACKAGE_MANAGER=pnpm` in automation.
+
+Init also runs `pnpm install` and `pnpm approve-builds --all`, initializes git in the generated app, creates the first commit with message `init`, and sets `origin` to the configured repository URL when one is known. If you add the repository later with `nstack configure --repository <git-url>`, nstack sets `origin` when the repo does not already have one.
 
 For automation or a scaffold-only run, use:
 
 ```sh
 nstack init my-app --yes
 nstack init my-app --no-deploy
+nstack init my-app --skip-install   # leave dependency install for later
 ```
 
 The generated app contains an Encore backend, a Nuxt frontend, production Dockerfiles for Dokploy Compose, and a minimal `nstack.config.mjs`.
 
 ### 8. Run Local Checks
 
-Run the generated checks before the first commit:
+Run the generated checks after init:
 
 ```sh
 pnpm check
@@ -236,20 +240,16 @@ For local development:
 pnpm dev
 ```
 
-### 9. Commit And Push The Initial Source
+### 9. Push The Initial Source
 
-Compose mode builds from Git on the Dokploy server. That means the source must be committed and pushed before a remote production deploy can build it.
+Compose mode builds from Git on the Dokploy server. `nstack init` creates the initial `init` commit, so push that commit before a remote production deploy can build it.
 
 ```sh
-git init
-git remote add origin https://github.com/acme/my-app.git
-git add .
-git commit -m "init nstack app"
-git branch -M main
+git remote add origin https://github.com/acme/my-app.git   # only if origin is missing
 git push -u origin main
 ```
 
-If the repository already exists locally, use the normal `git remote`, `git add`, `git commit`, and `git push` flow for your project.
+If you passed `--repository` or selected a Git provider during init, nstack already set `origin`.
 
 ### 10. Link Or Adjust The Production Target
 
@@ -466,6 +466,20 @@ DOKPLOY_URL=https://dokploy.example.com
 DOKPLOY_API_KEY=...
 ```
 
+Interactive init/configure stores reusable Dokploy instances in the user config file at `$XDG_CONFIG_HOME/nstack/dokploy-instances.json`, or `~/.config/nstack/dokploy-instances.json` when `XDG_CONFIG_HOME` is not set. Package-manager defaults are stored in `$XDG_CONFIG_HOME/nstack/settings.json`, or `~/.config/nstack/settings.json`.
+
+DNS validation is warning-only by default. To make DNS mismatches block deploys again, add this to `nstack.config.mjs`:
+
+```js
+export default {
+  deploy: {
+    dnsValidation: "block",
+  },
+};
+```
+
+Use `dnsValidation: "warn"` for the default warning behavior, or `dnsValidation: "skip"` to skip the preflight DNS check.
+
 Useful configure flags:
 
 ```sh
@@ -521,7 +535,12 @@ git push
 nstack deploy
 ```
 
-For Compose source builds, the Dokploy server builds from Git. If your code is not committed and pushed to the configured repository or branch, Dokploy cannot build that exact change.
+For Compose source builds, the Dokploy server builds from Git. Before a deploy, nstack commits generated `deploy/nstack` artifacts and pushes the current repo to the configured repository and branch. If the remote repository does not exist or git credentials cannot push to it, create a private repository on GitHub, GitLab, Bitbucket, or Gitea/Forgejo and push the app first:
+
+```sh
+git remote add origin <git-url>   # only if origin is missing
+git push -u origin <branch>
+```
 
 Useful deploy variants:
 
@@ -896,6 +915,8 @@ Project setup:
 nstack init [dir]
 nstack init [dir] --name "My App" --slug my-app
 nstack init [dir] --force --yes
+nstack init [dir] --package-manager pnpm
+nstack init [dir] --skip-install
 ```
 
 Link or update deploy settings:

@@ -132,7 +132,7 @@ test("cli allows option values that start with -- through equals syntax", async 
   const originalLog = console.log;
   try {
     console.log = (value = "") => output.push(String(value));
-    const report = await runCli(["init", target, "--force", "--json", "--name=--demo"]);
+    const report = await runCli(["init", target, "--force", "--json", "--skip-install", "--name=--demo"]);
     assert.equal(report.app.name, "--demo");
   } finally {
     console.log = originalLog;

@@ -666,6 +666,87 @@ export const db = new SQLDatabase("app", {});
   assert.equal(state.lastRelease, undefined);
 });
 
+test("deploy repairs stale Dokploy environment state before provisioning databases", async () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "nstack-stale-env-"));
+  mkdirSync(path.join(cwd, ".nstack"), { recursive: true });
+  mkdirSync(path.join(cwd, "backend", "api"), { recursive: true });
+  writeFileSync(path.join(cwd, "nstack.config.mjs"), `export default {
+  app: { name: "Stale Env", slug: "stale-env" },
+  paths: { backend: "backend", frontend: "frontend", frontendDockerfile: "frontend/Dockerfile" },
+  deploy: { provider: { type: "dokploy" } },
+  verify: { endpoints: [] },
+};\n`);
+  writeFileSync(path.join(cwd, "backend", "api", "db.ts"), `import { SQLDatabase } from "encore.dev/storage/sqldb";
+export const db = new SQLDatabase("app", {});
+`);
+  writeFileSync(path.join(cwd, ".nstack", "state.json"), `${JSON.stringify({
+    dokploy: {
+      projectId: "project-1",
+      environmentId: "environment-deleted",
+      composeId: "compose-deleted",
+      postgresId: "postgres-deleted",
+      schedules: { stale: "schedule-deleted" },
+    },
+  }, null, 2)}\n`);
+
+  const envKeys = ["NSTACK_DOMAIN", "NSTACK_REGISTRY", "DOKPLOY_URL", "DOKPLOY_API_KEY"];
+  const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+  process.env.NSTACK_DOMAIN = "stale-env.example.test";
+  process.env.NSTACK_REGISTRY = "ghcr.io/acme/stale-env";
+  process.env.DOKPLOY_URL = "https://dokploy.example.test";
+  process.env.DOKPLOY_API_KEY = "dummy";
+
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    const parsed = new URL(String(url));
+    const endpoint = parsed.pathname.replace(/^\/api\/(?:trpc\/)?/, "");
+    const method = init.method || "GET";
+    const body = init.body ? JSON.parse(init.body) : null;
+    calls.push({ method, endpoint, body });
+    if (method === "GET") {
+      if (endpoint === "project.all") return Response.json({ json: [{ projectId: "project-1", name: "Stale Env" }] });
+      if (endpoint === "environment.byProjectId") return Response.json({ json: [{ environmentId: "environment-1", name: "production" }] });
+      if (endpoint.endsWith(".search") || endpoint === "domain.byComposeId" || endpoint === "schedule.list") return Response.json({ json: [] });
+      if (endpoint === "settings.getIp") return Response.json({ json: "203.0.113.10" });
+    }
+    if (endpoint === "domain.validateDomain") return Response.json({ json: { isValid: true, resolvedIp: "203.0.113.10" } });
+    const ids = {
+      "postgres.create": { postgresId: "postgres-1" },
+      "compose.create": { composeId: "compose-1" },
+    };
+    return Response.json({ json: ids[endpoint] || {} });
+  };
+
+  try {
+    await deploy({
+      cwd,
+      skipBuild: true,
+      skipVerify: true,
+      skipStatus: true,
+      noWait: true,
+      yes: true,
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const key of envKeys) {
+      if (originalEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = originalEnv[key];
+    }
+  }
+
+  const postgresCreate = calls.find((call) => call.endpoint === "postgres.create");
+  assert.equal(postgresCreate.body.environmentId, "environment-1");
+  assert.equal(calls.some((call) => call.body?.environmentId === "environment-deleted"), false);
+
+  const state = JSON.parse(readFileSync(path.join(cwd, ".nstack", "state.json"), "utf8"));
+  assert.equal(state.dokploy.projectId, "project-1");
+  assert.equal(state.dokploy.environmentId, "environment-1");
+  assert.equal(state.dokploy.postgresId, "postgres-1");
+  assert.equal(state.dokploy.composeId, "compose-1");
+  assert.deepEqual(state.dokploy.schedules, {});
+});
+
 test("deploy refuses existing Dokploy database when local infra password is missing", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "nstack-existing-db-"));
   mkdirSync(path.join(cwd, "backend", "api"), { recursive: true });
@@ -937,6 +1018,7 @@ export const apiSecret = secret("API_SECRET");
 
 test("deploy configures Gitea source-backed Compose apps for push deployments", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "nstack-source-push-"));
+  const remote = path.join(tmpdir(), `nstack-source-push-${Date.now()}.git`);
   mkdirSync(path.join(cwd, "backend", "api"), { recursive: true });
   mkdirSync(path.join(cwd, "frontend"), { recursive: true });
   writeFileSync(path.join(cwd, "nstack.config.mjs"), `export default {
@@ -957,8 +1039,10 @@ test("deploy configures Gitea source-backed Compose apps for push deployments", 
   writeFileSync(path.join(cwd, "backend", "Dockerfile"), "FROM scratch\n");
   writeFileSync(path.join(cwd, "frontend", "Dockerfile"), "FROM scratch\n");
   execFileSync("git", ["init"], { cwd, stdio: "ignore" });
+  execFileSync("git", ["init", "--bare", remote], { stdio: "ignore" });
   execFileSync("git", ["config", "user.email", "nstack@example.test"], { cwd });
   execFileSync("git", ["config", "user.name", "nstack"], { cwd });
+  execFileSync("git", ["remote", "add", "origin", remote], { cwd });
   execFileSync("git", ["add", "."], { cwd });
   execFileSync("git", ["commit", "-m", "source push"], { cwd, stdio: "ignore" });
   const currentCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8" }).trim();
@@ -1037,8 +1121,12 @@ test("deploy configures Gitea source-backed Compose apps for push deployments", 
     const index = line.indexOf("=");
     return [line.slice(0, index), line.slice(index + 1)];
   }));
+  const finalCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8" }).trim();
+  const remoteCommit = execFileSync("git", ["rev-parse", "refs/heads/feature/push-deploy"], { cwd: remote, encoding: "utf8" }).trim();
   assert.equal(env.NSTACK_BUILD_CONTEXT, "../..");
-  assert.equal(env.NSTACK_GIT_COMMIT, currentCommit);
+  assert.notEqual(finalCommit, currentCommit);
+  assert.equal(remoteCommit, finalCommit);
+  assert.equal(env.NSTACK_GIT_COMMIT, finalCommit);
   assert.equal(env.NSTACK_IMAGE_TAG, "source-feature-push-deploy");
 });
 
@@ -1133,6 +1221,86 @@ test("deploy auto-commits generated source-backed artifacts before triggering Do
   }));
   assert.equal(deployCall.body.description.startsWith("Deploy "), true);
   assert.equal(env.NSTACK_GIT_COMMIT, deployCall.body.description.replace(/^Deploy /, ""));
+});
+
+test("deploy explains provider-backed source push failures before Compose upsert", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "nstack-source-push-fail-"));
+  const cwd = path.join(root, "app");
+  const missingRemote = path.join(root, "missing.git");
+  mkdirSync(path.join(cwd, "backend", "api"), { recursive: true });
+  mkdirSync(path.join(cwd, "frontend"), { recursive: true });
+  writeFileSync(path.join(cwd, "nstack.config.mjs"), `export default {
+  app: { name: "Push Fail", slug: "push-fail" },
+  deploy: {
+    buildMode: "compose",
+    source: {
+      sourceType: "github",
+      repository: "https://github.com/acme/missing.git",
+      branch: "main",
+      githubId: "github-1"
+    }
+  },
+  verify: { endpoints: [] },
+};\n`);
+  writeFileSync(path.join(cwd, "backend", "api", "status.ts"), `export const ok = true;\n`);
+  writeFileSync(path.join(cwd, "backend", "Dockerfile"), "FROM scratch\n");
+  writeFileSync(path.join(cwd, "frontend", "Dockerfile"), "FROM scratch\n");
+  execFileSync("git", ["init"], { cwd, stdio: "ignore" });
+  execFileSync("git", ["config", "user.email", "nstack@example.test"], { cwd });
+  execFileSync("git", ["config", "user.name", "nstack"], { cwd });
+  execFileSync("git", ["branch", "-M", "main"], { cwd });
+  execFileSync("git", ["remote", "add", "origin", missingRemote], { cwd });
+  execFileSync("git", ["add", "."], { cwd });
+  execFileSync("git", ["commit", "-m", "initial"], { cwd, stdio: "ignore" });
+
+  const envKeys = ["NSTACK_DOMAIN", "DOKPLOY_URL", "DOKPLOY_API_KEY"];
+  const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+  process.env.NSTACK_DOMAIN = "push-fail.example.test";
+  process.env.DOKPLOY_URL = "https://dokploy.example.test";
+  process.env.DOKPLOY_API_KEY = "dummy";
+
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    const parsed = new URL(String(url));
+    const endpoint = parsed.pathname.replace(/^\/api\/(?:trpc\/)?/, "");
+    calls.push(endpoint);
+    if ((init.method || "GET") === "GET") {
+      if (endpoint === "gitProvider.getAll") {
+        return Response.json({ json: [{ providerType: "github", github: { githubId: "github-1", isConfigured: true } }] });
+      }
+      if (endpoint === "github.githubProviders") return Response.json({ json: [{ githubId: "github-1" }] });
+      if (endpoint === "project.all" || endpoint === "environment.byProjectId") return Response.json({ json: [] });
+      if (endpoint === "settings.getIp") return Response.json({ json: "203.0.113.10" });
+    }
+    if (endpoint === "domain.validateDomain") return Response.json({ json: { isValid: true, resolvedIp: "203.0.113.10" } });
+    const ids = {
+      "project.create": { projectId: "project-1" },
+      "environment.create": { environmentId: "environment-1" },
+    };
+    return Response.json({ json: ids[endpoint] || {} });
+  };
+
+  try {
+    await assert.rejects(
+      deploy({ cwd, noWait: true, skipVerify: true, skipStatus: true, yes: true }),
+      (error) => {
+        assert.match(error.message, /Could not push source repository https:\/\/github\.com\/acme\/missing\.git/);
+        assert.match(error.message, /Create a private repository on your Git provider and push this app before deploying/);
+        assert.match(error.message, /git push -u origin main/);
+        return true;
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const key of envKeys) {
+      if (originalEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = originalEnv[key];
+    }
+  }
+
+  assert.equal(calls.includes("compose.create"), false);
+  assert.equal(calls.includes("compose.update"), false);
 });
 
 test("deploy passes target platform to backend and frontend image builds", async () => {

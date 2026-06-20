@@ -89,6 +89,7 @@ test("loadConfig preserves provider-specific source settings", async () => {
   writeFileSync(path.join(cwd, "nstack.config.mjs"), `export default {
   app: { name: "Source App", slug: "source-app" },
   deploy: {
+    dnsValidation: "strict",
     source: {
       sourceType: "gitlab",
       repository: "https://gitlab.example.test/platform/apps/source-app.git",
@@ -104,6 +105,7 @@ test("loadConfig preserves provider-specific source settings", async () => {
 
   const config = await loadConfig(cwd);
 
+  assert.equal(config.deploy.dnsValidation, "block");
   assert.equal(config.deploy.source.sourceType, "gitlab");
   assert.equal(config.deploy.source.repository, "https://gitlab.example.test/platform/apps/source-app.git");
   assert.equal(config.deploy.source.branch, "main");

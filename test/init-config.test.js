@@ -1,18 +1,44 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { runCli } from "../src/cli.js";
+import { saveDokployInstance } from "../src/dokploy-instances.js";
 
 test("init keeps deploy target values out of source config", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "nstack-init-"));
   const target = path.join(cwd, "app");
+  const fakeBin = path.join(cwd, "bin");
+  const pnpmLog = path.join(cwd, "pnpm.log");
   const envKeys = ["NSTACK_DOMAIN", "NSTACK_REGISTRY", "DOKPLOY_URL", "DOKPLOY_API_KEY"];
   const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+  const originalPath = process.env.PATH;
+  const originalFakePnpmLog = process.env.NSTACK_FAKE_PNPM_LOG;
+  mkdirSync(fakeBin, { recursive: true });
+  writeFileSync(path.join(fakeBin, "pnpm"), `#!/usr/bin/env sh
+if [ "$1" = "--version" ]; then
+  printf '10.33.2\\n'
+  exit 0
+fi
+printf '%s\\n' "$*" >> "$NSTACK_FAKE_PNPM_LOG"
+if [ "$1" = "install" ]; then
+  printf 'lockfileVersion: "9.0"\\n' > pnpm-lock.yaml
+  exit 0
+fi
+if [ "$1" = "approve-builds" ] && [ "$2" = "--all" ]; then
+  printf '\\nonlyBuiltDependencies:\\n  - esbuild\\n  - "@parcel/watcher"\\n' >> pnpm-workspace.yaml
+  exit 0
+fi
+exit 1
+`);
+  chmodSync(path.join(fakeBin, "pnpm"), 0o755);
 
   try {
-    await runCli([
+    process.env.PATH = `${fakeBin}:${originalPath || ""}`;
+    process.env.NSTACK_FAKE_PNPM_LOG = pnpmLog;
+    const report = await runCli([
       "init",
       target,
       "--yes",
@@ -25,11 +51,21 @@ test("init keeps deploy target values out of source config", async () => {
       "--dokploy-api-key",
       "secret-token",
     ]);
+    assert.equal(report.install.skipped, false);
+    assert.deepEqual(report.install.commands, ["pnpm install --no-frozen-lockfile", "pnpm approve-builds --all"]);
+    assert.deepEqual(report.next, [
+      "nstack configure --domain <domain> --dokploy-url <url> --dokploy-api-key <key> --repository <git-url>",
+      "nstack deploy",
+    ]);
   } finally {
     for (const key of envKeys) {
       if (originalEnv[key] === undefined) delete process.env[key];
       else process.env[key] = originalEnv[key];
     }
+    if (originalPath === undefined) delete process.env.PATH;
+    else process.env.PATH = originalPath;
+    if (originalFakePnpmLog === undefined) delete process.env.NSTACK_FAKE_PNPM_LOG;
+    else process.env.NSTACK_FAKE_PNPM_LOG = originalFakePnpmLog;
   }
 
   const config = readFileSync(path.join(target, "nstack.config.mjs"), "utf8");
@@ -40,6 +76,13 @@ test("init keeps deploy target values out of source config", async () => {
   assert.match(localEnv, /NSTACK_REGISTRY=ghcr\.io\/acme\/app/);
   assert.match(localEnv, /DOKPLOY_URL=https:\/\/dokploy\.example\.test/);
   assert.match(localEnv, /DOKPLOY_API_KEY=secret-token/);
+
+  assert.equal(execFileSync("git", ["-C", target, "log", "-1", "--pretty=%s"], { encoding: "utf8" }).trim(), "init");
+  assert.equal(execFileSync("git", ["-C", target, "branch", "--show-current"], { encoding: "utf8" }).trim(), "main");
+  assert.equal(execFileSync("git", ["-C", target, "status", "--short"], { encoding: "utf8" }).trim(), "");
+  assert.deepEqual(readFileSync(pnpmLog, "utf8").trim().split("\n"), ["install --no-frozen-lockfile", "approve-builds --all"]);
+  assert.equal(execFileSync("git", ["-C", target, "ls-tree", "-r", "--name-only", "HEAD", "pnpm-lock.yaml"], { encoding: "utf8" }).trim(), "pnpm-lock.yaml");
+  assert.match(readFileSync(path.join(target, "pnpm-workspace.yaml"), "utf8"), /onlyBuiltDependencies:/);
 
   const gitignore = readFileSync(path.join(target, ".gitignore"), "utf8");
   assert.match(gitignore, /^\.nstack$/m);
@@ -137,7 +180,7 @@ test("cli flags do not mutate process env while writing local config", async () 
   for (const key of envKeys) delete process.env[key];
 
   try {
-    await runCli(["init", target, "--yes"]);
+    await runCli(["init", target, "--yes", "--skip-install"]);
     const previousCwd = process.cwd();
     process.chdir(target);
     try {
@@ -174,7 +217,7 @@ test("configure persists provider-specific source settings non-interactively", a
   const cwd = mkdtempSync(path.join(tmpdir(), "nstack-configure-source-"));
   const target = path.join(cwd, "app");
 
-  await runCli(["init", target, "--yes"]);
+  await runCli(["init", target, "--yes", "--skip-install"]);
   const previousCwd = process.cwd();
   process.chdir(target);
   try {
@@ -218,13 +261,19 @@ test("configure persists provider-specific source settings non-interactively", a
   assert.match(localEnv, /NSTACK_GITEA_ID=gitea-1/);
   assert.match(localEnv, /NSTACK_COMPOSE_PATH=deploy\/nstack\/compose\.dokploy\.yaml/);
   assert.match(localEnv, /NSTACK_WATCH_PATHS="backend\/\*\*,frontend\/\*\*,deploy\/nstack\/\*\*"/);
+
+  assert.equal(
+    execFileSync("git", ["-C", target, "remote", "get-url", "origin"], { encoding: "utf8" }).trim(),
+    "git@git.example.test:acme/demo.git",
+  );
+  assert.equal(execFileSync("git", ["-C", target, "log", "-1", "--pretty=%s"], { encoding: "utf8" }).trim(), "init");
 });
 
 test("configure infers provider-backed source settings from Dokploy", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "nstack-configure-infer-source-"));
   const target = path.join(cwd, "app");
 
-  await runCli(["init", target, "--yes"]);
+  await runCli(["init", target, "--yes", "--skip-install"]);
   const calls = [];
   const originalFetch = globalThis.fetch;
   const previousCwd = process.cwd();
@@ -283,7 +332,7 @@ test("init skips deploy wizard when stdin is not interactive", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "nstack-init-nontty-"));
   const target = path.join(cwd, "app");
 
-  const report = await runCli(["init", target]);
+  const report = await runCli(["init", target, "--skip-install"]);
 
   assert.equal(report.files.localEnv, null);
   assert.deepEqual(report.next, [
@@ -301,6 +350,7 @@ test("init can write deploy settings for a non-prod target", async () => {
     "init",
     target,
     "--yes",
+    "--skip-install",
     "--env",
     "staging",
     "--domain",
@@ -325,6 +375,7 @@ test("init can write provider-specific source settings non-interactively", async
     "init",
     target,
     "--yes",
+    "--skip-install",
     "--domain",
     "source.example.test",
     "--dokploy-url",
@@ -378,6 +429,7 @@ test("init --json reports scaffold metadata without secret values", async () => 
       target,
       "--yes",
       "--json",
+      "--skip-install",
       "--name",
       "Json Init",
       "--domain",
@@ -410,10 +462,75 @@ test("init --json reports scaffold metadata without secret values", async () => 
   assert.doesNotMatch(json, /secret-token/);
 });
 
+test("interactive init can select a configured Dokploy instance", async () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "nstack-init-dokploy-instance-"));
+  const target = path.join(cwd, "app");
+  const instancesFile = path.join(cwd, "dokploy-instances.json");
+  saveDokployInstance({ name: "Production", url: "https://dokploy.saved.test", apiKey: "saved-token" }, instancesFile);
+
+  const envKeys = [
+    "NSTACK_DOKPLOY_INSTANCES_FILE",
+    "NSTACK_INIT_DEPLOY",
+    "NSTACK_DOMAIN",
+    "NSTACK_DOKPLOY_INSTANCE",
+    "NSTACK_GIT_SOURCE",
+    "NSTACK_SOURCE_TYPE",
+    "NSTACK_REPOSITORY",
+    "NSTACK_BRANCH",
+    "NSTACK_GIT_SSH_KEY_ID",
+    "NSTACK_PACKAGE_MANAGER",
+    "DOKPLOY_URL",
+    "DOKPLOY_API_KEY",
+  ];
+  const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+  const originalIsTTY = process.stdin.isTTY;
+  const originalFetch = globalThis.fetch;
+  for (const key of envKeys) delete process.env[key];
+
+  try {
+    process.stdin.isTTY = true;
+    process.env.NSTACK_DOKPLOY_INSTANCES_FILE = instancesFile;
+    process.env.NSTACK_INIT_DEPLOY = "true";
+    process.env.NSTACK_DOMAIN = "saved.example.test";
+    process.env.NSTACK_DOKPLOY_INSTANCE = "Production";
+    process.env.NSTACK_GIT_SOURCE = "manual";
+    process.env.NSTACK_SOURCE_TYPE = "git";
+    process.env.NSTACK_REPOSITORY = "git@git.example.test:acme/saved.git";
+    process.env.NSTACK_BRANCH = "main";
+    process.env.NSTACK_GIT_SSH_KEY_ID = "ssh-key-1";
+    process.env.NSTACK_PACKAGE_MANAGER = "pnpm";
+    globalThis.fetch = async (url) => {
+      const parsed = new URL(String(url));
+      assert.equal(parsed.hostname, "dokploy.saved.test");
+      if (parsed.pathname === "/api/trpc/gitProvider.getAll") return Response.json({ json: [] });
+      assert.fail(`Unexpected Dokploy endpoint ${parsed.pathname}`);
+    };
+
+    const report = await runCli(["init", target, "--skip-install"]);
+    assert.equal(report.deploy.dokployUrl, "https://dokploy.saved.test");
+    assert.equal(report.deploy.dokployApiKeySet, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+    process.stdin.isTTY = originalIsTTY;
+    for (const key of envKeys) {
+      if (originalEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = originalEnv[key];
+    }
+  }
+
+  const localEnv = readFileSync(path.join(target, ".nstack", "local.env"), "utf8");
+  assert.match(localEnv, /NSTACK_DOMAIN=saved\.example\.test/);
+  assert.match(localEnv, /DOKPLOY_URL=https:\/\/dokploy\.saved\.test/);
+  assert.match(localEnv, /DOKPLOY_API_KEY=saved-token/);
+  assert.match(localEnv, /NSTACK_SOURCE_TYPE=git/);
+  assert.match(localEnv, /NSTACK_REPOSITORY=git@git\.example\.test:acme\/saved\.git/);
+  assert.match(localEnv, /NSTACK_GIT_SSH_KEY_ID=ssh-key-1/);
+});
+
 test("configure --json reports link metadata without API key values", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "nstack-config-json-"));
   const target = path.join(cwd, "app");
-  await runCli(["init", target, "--yes"]);
+  await runCli(["init", target, "--yes", "--skip-install"]);
 
   const output = [];
   const originalLog = console.log;

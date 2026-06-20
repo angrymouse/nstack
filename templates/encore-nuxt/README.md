@@ -5,9 +5,12 @@ Encore + Nuxt app deployed by `nstack`.
 ## Local
 
 ```sh
-pnpm install
 pnpm dev
 ```
+
+`nstack init` installs dependencies and approves pnpm build scripts before the
+initial git commit. If this app was copied manually, run `pnpm install` and
+`pnpm approve-builds --all` first.
 
 ## Deploy
 

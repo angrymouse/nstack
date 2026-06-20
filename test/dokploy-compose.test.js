@@ -166,6 +166,9 @@ test("upsertCompose falls back to compose.update when saveEnvironment is unavail
     const body = init.body ? JSON.parse(init.body) : null;
     calls.push({ method: init.method, path: parsed.pathname, body });
 
+    if (parsed.pathname === "/api/compose.one") {
+      return Response.json({ json: { composeId: "compose-1" } });
+    }
     if (parsed.pathname === "/api/compose.saveEnvironment") {
       return Response.json({ code: "NOT_FOUND", message: "Not found" }, { status: 404 });
     }
@@ -199,6 +202,9 @@ test("upsertCompose can save a Gitea source-backed Compose app for push deploys"
     const parsed = new URL(String(url));
     const body = init.body ? JSON.parse(init.body) : null;
     calls.push({ method: init.method, path: parsed.pathname, body });
+    if (parsed.pathname === "/api/compose.one") {
+      return Response.json({ json: { composeId: "compose-1" } });
+    }
     return Response.json({ json: {} });
   };
 
@@ -379,6 +385,9 @@ test("upsertCompose saves provider-specific source fields", async () => {
       const parsed = new URL(String(url));
       const body = init.body ? JSON.parse(init.body) : null;
       calls.push({ method: init.method, path: parsed.pathname, body });
+      if (parsed.pathname === "/api/compose.one") {
+        return Response.json({ json: { composeId: "compose-1" } });
+      }
       return Response.json({ json: {} });
     };
 
@@ -741,4 +750,44 @@ test("ensureGiteaComposeWebhook keeps an existing Forgejo webhook", async () => 
   }
 
   assert.deepEqual(calls, [{ method: "GET", path: "/api/v1/repos/acme/source-app/hooks" }]);
+});
+
+test("ensureGiteaComposeWebhook tells users to create and push missing Forgejo repos", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({
+    message: "The target couldn't be found.",
+    url: "https://git.example.test/api/swagger",
+    errors: [],
+  }, { status: 404 });
+
+  try {
+    await assert.rejects(
+      ensureGiteaComposeWebhook({
+        dokployUrl: "https://dokploy.example.test/",
+        compose: {
+          refreshToken: "refresh-1",
+          gitea: {
+            giteaUrl: "https://git.example.test",
+            accessToken: "token-1",
+          },
+        },
+        source: {
+          owner: "acme",
+          repository: "source-app",
+          branch: "main",
+        },
+      }),
+      (error) => {
+        assert.match(error.message, /Gitea repository acme\/source-app was not found/);
+        assert.match(error.message, /Create a private repository in Gitea\/Forgejo and push this app before deploying/);
+        assert.match(error.message, /git remote add origin https:\/\/git\.example\.test\/acme\/source-app\.git/);
+        assert.match(error.message, /git commit -m "init"/);
+        assert.match(error.message, /git push -u origin main/);
+        assert.doesNotMatch(error.message, /token-1/);
+        return true;
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

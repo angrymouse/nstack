@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { cleanup } from "./cleanup.js";
 import { configure, deploy, redeploy, rollback, verify, waitForDeployment } from "./deploy.js";
 import { cancelDeployment, inspectDeployment, listDeployments, logs } from "./deployments.js";
+import { promptDokployInstance } from "./dokploy-instances.js";
 import { Prompter } from "./prompt.js";
 import { DokployClient, loadDokploySourceProviders } from "./providers/dokploy.js";
 import {
@@ -16,12 +17,13 @@ import {
 } from "./config.js";
 import { doctor } from "./doctor.js";
 import { openTarget } from "./open.js";
+import { packageManagerInstallCommands, promptPackageManager } from "./package-manager.js";
 import { pull } from "./pull.js";
 import { runSecretCommand } from "./secrets.js";
 import { showStatus } from "./status.js";
 import { listTargets } from "./targets.js";
 import { undeploy } from "./undeploy.js";
-import { commandOutput, copyTree, ensureDir, fileExists, mergeEnvFile, readJSON, removeIfExists, slugify } from "./util.js";
+import { commandOutput, copyTree, ensureDir, fileExists, mergeEnvFile, readJSON, removeIfExists, run, slugify } from "./util.js";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const booleanOptions = new Set([
@@ -34,6 +36,7 @@ const booleanOptions = new Set([
   "skipVerify",
   "skipStatus",
   "skipRemote",
+  "skipInstall",
   "prebuilt",
   "noWait",
   "all",
@@ -43,6 +46,7 @@ const booleanOptions = new Set([
   "print",
   "noBrowser",
   "noDeploy",
+  "noInstall",
   "dashboard",
   "stage",
   "follow",
@@ -87,6 +91,7 @@ const valueOptions = new Set([
   "timeoutMs",
   "intervalMs",
   "to",
+  "packageManager",
 ]);
 
 export async function runCli(argv) {
@@ -133,6 +138,7 @@ async function init(target, options) {
 
   const appName = options.name || path.basename(cwd);
   const slug = slugify(options.slug || appName);
+  const packageManager = await initPackageManager(options);
   copyTree(templateDir, cwd, {
     APP_NAME: appName,
     APP_SLUG: slug,
@@ -143,12 +149,16 @@ async function init(target, options) {
   if (Object.keys(localEnv).length > 0) {
     mergeEnvFile(path.join(cwd, localEnvPathForTarget(localEnv.NSTACK_TARGET || "prod")), localEnv);
   }
+  const install = installGeneratedDependencies(cwd, options, packageManager);
+  ensureInitialGitCommit(cwd, localEnv);
   const report = initReport({
     cwd,
     appName,
     slug,
     template,
     localEnv,
+    packageManager,
+    install,
   });
   if (options.json) {
     console.log(JSON.stringify(report, null, 2));
@@ -158,6 +168,58 @@ async function init(target, options) {
   console.log("Next:");
   for (const step of report.next) console.log(`  ${step}`);
   return report;
+}
+
+async function initPackageManager(options = {}) {
+  const prompter = new Prompter({ yes: options.yes });
+  try {
+    return await promptPackageManager(prompter, {
+      requested: options.packageManager,
+      requireAvailable: !(options.skipInstall || options.noInstall),
+    });
+  } finally {
+    prompter.close();
+  }
+}
+
+function installGeneratedDependencies(cwd, options = {}, packageManager) {
+  if (options.skipInstall || options.noInstall) return { skipped: true };
+  const commands = packageManagerInstallCommands(packageManager);
+  for (const command of commands) run(command.command, command.args, { cwd, capture: true });
+  return {
+    skipped: false,
+    packageManager: packageManager.name,
+    commands: commands.map((command) => command.label),
+  };
+}
+
+function ensureInitialGitCommit(cwd, localEnv = {}) {
+  if (fileExists(path.join(cwd, ".git"))) return;
+
+  const branch = localEnv.NSTACK_BRANCH || "main";
+  run("git", ["init"], { cwd, capture: true });
+  run("git", ["checkout", "-B", branch], { cwd, capture: true });
+  if (localEnv.NSTACK_REPOSITORY) {
+    run("git", ["remote", "add", "origin", localEnv.NSTACK_REPOSITORY], { cwd, capture: true });
+  }
+  run("git", ["add", "."], { cwd, capture: true });
+  const staged = commandOutput("git", ["diff", "--cached", "--name-only"], { cwd }).trim();
+  if (!staged) return;
+  run("git", ["commit", "-m", "init"], {
+    cwd,
+    capture: true,
+    env: gitCommitEnv(),
+  });
+}
+
+function gitCommitEnv() {
+  return {
+    ...process.env,
+    GIT_AUTHOR_NAME: process.env.GIT_AUTHOR_NAME || "nstack",
+    GIT_AUTHOR_EMAIL: process.env.GIT_AUTHOR_EMAIL || "nstack@example.invalid",
+    GIT_COMMITTER_NAME: process.env.GIT_COMMITTER_NAME || "nstack",
+    GIT_COMMITTER_EMAIL: process.env.GIT_COMMITTER_EMAIL || "nstack@example.invalid",
+  };
 }
 
 async function unlink(options = {}) {
@@ -230,14 +292,13 @@ async function initDeployWizard(cwd, options, existingEnv) {
     if (!enabled) return {};
 
     const domain = await prompter.ask("NSTACK_DOMAIN", "App domain");
-    const dokployUrl = await prompter.ask("DOKPLOY_URL", "Dokploy URL");
-    const dokployApiKey = await prompter.ask("DOKPLOY_API_KEY", "Dokploy API key", { secret: true });
-    const providers = await loadDokployGitProviders({ dokployUrl, dokployApiKey });
+    const dokploy = await promptDokployInstance(prompter);
+    const providers = await loadDokployGitProviders({ dokployUrl: dokploy.url, dokployApiKey: dokploy.apiKey });
     const source = await promptGitSource({ cwd, prompter, providers });
     return {
       NSTACK_DOMAIN: domain,
-      DOKPLOY_URL: dokployUrl,
-      DOKPLOY_API_KEY: dokployApiKey,
+      DOKPLOY_URL: dokploy.url,
+      DOKPLOY_API_KEY: dokploy.apiKey,
       ...source,
     };
   } finally {
@@ -392,7 +453,7 @@ function inferGitBranch(cwd) {
   }
 }
 
-function initReport({ cwd, appName, slug, template, localEnv }) {
+function initReport({ cwd, appName, slug, template, localEnv, packageManager = { name: "pnpm" }, install = { skipped: true } }) {
   const target = normalizeTarget(localEnv.NSTACK_TARGET || "prod");
   const localEnvKeys = Object.keys(localEnv).sort();
   return {
@@ -426,14 +487,16 @@ function initReport({ cwd, appName, slug, template, localEnv }) {
     localEnv: {
       keys: localEnvKeys,
     },
-    next: initNextSteps(localEnv),
+    packageManager: packageManager.name,
+    install,
+    next: initNextSteps(localEnv, install),
   };
 }
 
-function initNextSteps(localEnv) {
+function initNextSteps(localEnv, install = { skipped: true }) {
   const linked = Boolean(localEnv.NSTACK_DOMAIN && localEnv.DOKPLOY_URL && localEnv.DOKPLOY_API_KEY && localEnv.NSTACK_REPOSITORY);
   return [
-    "pnpm install",
+    ...(install.skipped ? ["pnpm install"] : []),
     ...(linked ? [] : ["nstack configure --domain <domain> --dokploy-url <url> --dokploy-api-key <key> --repository <git-url>"]),
     "nstack deploy",
   ];
@@ -547,7 +610,6 @@ function help() {
 Start:
   nstack init [dir]
   cd <dir>
-  pnpm install
   nstack configure --domain <host> --dokploy-url <url> --dokploy-api-key <key> --repository <git-url>
   nstack deploy
 
@@ -579,12 +641,15 @@ Configure:
   --source-type <type>           github, gitlab, bitbucket, gitea, or git
   --dokploy-url <url>            Dokploy panel URL
   --dokploy-api-key <key>        Dokploy API key
+  NSTACK_DOKPLOY_INSTANCE        saved Dokploy instance name or URL for prompts
+  --package-manager <name>       package manager for init; currently pnpm
   --registry <prefix>            opt into registry image pushes, e.g. ghcr.io/acme/my-app
   --platform <os/arch>           image target platform, linux/amd64 or linux/arm64
   --project <name>               Dokploy project name
   --environment <name>           Dokploy environment name
   --server-id <id>               optional Dokploy deploy server/runner id
   --no-deploy                    skip the interactive init deploy wizard
+  --skip-install                 skip init dependency install and pnpm build approvals
 
 Deploy:
   --no-wait                      trigger deploy and return before verification/status

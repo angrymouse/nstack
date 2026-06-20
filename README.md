@@ -7,13 +7,22 @@ It keeps the app shape boring:
 ```sh
 nstack init my-app
 cd my-app
-pnpm install
 nstack deploy
 ```
 
-Interactive `nstack init` can link Dokploy and asks you to pick an existing Git
-provider or add a manual Git source. In CI, use `nstack configure` with flags or
-env vars for the same settings.
+Interactive `nstack init` can link Dokploy by picking a saved Dokploy instance
+or adding a new one, then asks you to pick an existing Git provider or add a
+manual Git source. It also asks which package manager to use for init; the
+Encore + Nuxt template currently supports pnpm and can remember it as the
+default for new projects. In CI, use `nstack configure` with flags or env vars
+for the same settings.
+
+`nstack init` initializes a git repository, creates the initial `init` commit,
+and sets `origin` when a repository URL is configured. Before that commit, it
+runs `pnpm install` and `pnpm approve-builds --all`, so the lockfile and pnpm
+build approvals are part of the first commit. Source-backed deploys push the
+current repo before asking Dokploy to build it. When the backing Git repository
+needs to be created first, nstack treats a private repository as the default.
 
 `nstack deploy` discovers Encore resources, renders Encore infra and Dokploy
 Compose, lets Dokploy build the production backend/frontend services from source,

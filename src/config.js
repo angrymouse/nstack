@@ -50,6 +50,7 @@ export function normalizeConfig(config, options = {}) {
       registry: process.env.NSTACK_REGISTRY || deploy.registry || "",
       buildMode: normalizeBuildMode(process.env.NSTACK_BUILD_MODE || deploy.buildMode, process.env.NSTACK_REGISTRY || deploy.registry || ""),
       platform: process.env.NSTACK_PLATFORM || process.env.PROD_PLATFORM || deploy.platform || "linux/amd64",
+      dnsValidation: normalizeDnsValidation(process.env.NSTACK_DNS_VALIDATION || deploy.dnsValidation || deploy.domainValidation || ""),
       source: normalizeSource(deploy.source || {}),
       provider: {
         type: provider.type || "dokploy",
@@ -76,6 +77,13 @@ export function normalizeBuildMode(value, registry = "") {
   if (["registry", "image", "images", "push"].includes(mode)) return "registry";
   if (["compose", "dokploy", "source", "source-build", "remote"].includes(mode)) return "compose";
   return registry ? "registry" : "compose";
+}
+
+export function normalizeDnsValidation(value = "") {
+  const mode = String(value || "").trim().toLowerCase();
+  if (["block", "blocking", "error", "fail", "strict", "required"].includes(mode)) return "block";
+  if (["off", "skip", "false", "none", "disabled"].includes(mode)) return "skip";
+  return "warn";
 }
 
 function normalizeSource(source = {}) {

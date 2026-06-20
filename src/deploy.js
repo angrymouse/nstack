@@ -15,6 +15,7 @@ import {
 } from "./config.js";
 import { createDoctorReport, inspectResources, preflightError, preflightFailures } from "./doctor.js";
 import { normalizeTargetPlatform } from "./platform.js";
+import { createProgress } from "./progress.js";
 import {
   DokployClient,
   DokployProvider,
@@ -23,6 +24,7 @@ import {
   resolveComposeSourceConfig,
   sourceRefLabelForConfig,
 } from "./providers/dokploy.js";
+import { promptDokployInstance } from "./dokploy-instances.js";
 import {
   OBJECT_STORAGE_ACCESS_ENV,
   OBJECT_STORAGE_SECRET_ENV,
@@ -67,17 +69,18 @@ export async function deploy(options = {}) {
   const state = loadState(cwd, config.deploy.target);
   const skipBuild = Boolean(options.skipBuild || options.prebuilt || config.deploy.buildMode === "compose");
   let release = resolveRelease(config, cwd, { ...options, skipBuild });
-  const resources = await inspectResources(cwd, config);
+  const progress = createProgress({ enabled: !options.json && !options.renderOnly && !options.dryRun && !options.buildOnly });
+  const resources = await progress.step("Inspecting Encore resources", () => inspectResources(cwd, config));
   const timings = [];
   const localOnly = options.renderOnly || options.dryRun || options.buildOnly;
   const command = options.buildOnly ? "build" : localOnly ? "render" : "deploy";
-  const initialReport = await createDoctorReport({ cwd, config, state, resources });
+  const initialReport = await progress.step("Running local preflight checks", () => createDoctorReport({ cwd, config, state, resources }));
   assertPreflight(command, initialReport, {
     skipBuild,
     ignore: localOnly ? [] : ["app-secrets"],
   });
   if (!localOnly) {
-    const remoteReport = await createDoctorReport({ cwd, config, state, resources, checkRemote: true });
+    const remoteReport = await progress.step("Checking Dokploy access", () => createDoctorReport({ cwd, config, state, resources, checkRemote: true }));
     assertPreflight("deploy", remoteReport, {
       skipBuild,
       ignore: ["app-secrets"],
@@ -85,11 +88,11 @@ export async function deploy(options = {}) {
   }
   const secretEnv = localOnly ? {} : await completeAppSecrets(resources, cwd, options, config.deploy.target);
   if (!localOnly) {
-    const secretsReport = await createDoctorReport({ cwd, config, state, resources });
+    const secretsReport = await progress.step("Checking app secrets", () => createDoctorReport({ cwd, config, state, resources }));
     assertPreflight("deploy", secretsReport, { skipBuild });
     const preflightProvider = new DokployProvider({ config, state });
-    await timedAsync("dokploy: validate dns", true, timings, () => preflightProvider.validateAppDomain());
-    await timedAsync("dokploy: enable docker cleanup", true, timings, () => preflightProvider.enableDockerCleanup());
+    await progress.step("Validating DNS", () => timedAsync("dokploy: validate dns", true, timings, () => preflightProvider.validateAppDomain()));
+    await progress.step("Enabling Dokploy cleanup", () => timedAsync("dokploy: enable docker cleanup", true, timings, () => preflightProvider.enableDockerCleanup()));
   }
   const infra = ensureInfraSecrets({ config, resources, state });
   const generatedInfraSecrets = {
@@ -165,64 +168,76 @@ export async function deploy(options = {}) {
   }
 
   if (!skipBuild) {
-    buildArtifacts({ config, cwd, resources, artifacts, images, infraFile, composeFile, composeEnv: composeBuildEnv, quiet: options.json, timings });
+    await progress.step("Building registry images", async () => {
+      buildArtifacts({ config, cwd, resources, artifacts, images, infraFile, composeFile, composeEnv: composeBuildEnv, quiet: options.json, timings });
+    });
     writeReleaseManifest(releaseFile, releaseManifest({ config, resources, images, release, infraFile, composeFile }));
   }
 
   const provider = new DokployProvider({ config, state: nextState });
-  const projectId = await provider.ensureProject();
+  const previousProjectId = nextState.dokploy.projectId || "";
+  const projectId = await progress.step("Ensuring Dokploy project", () => provider.ensureProject());
+  if (previousProjectId && previousProjectId !== projectId) clearDokployEnvironmentState(nextState.dokploy);
   nextState.dokploy.projectId = projectId;
   persistState();
 
-  const environmentId = await provider.ensureEnvironment(projectId);
+  const previousEnvironmentId = nextState.dokploy.environmentId || "";
+  const environmentId = await progress.step("Ensuring Dokploy environment", () => provider.ensureEnvironment(projectId));
+  if (previousEnvironmentId && previousEnvironmentId !== environmentId) clearDokployResourceState(nextState.dokploy);
   nextState.dokploy.environmentId = environmentId;
   persistState();
 
   if (resources.buckets.length > 0) {
-    const existingComposeId = nextState.dokploy.composeId || await provider.findComposeId(environmentId);
-    if (existingComposeId && generatedInfraSecrets.objectStorage) {
-      const remoteEnv = await provider.readComposeEnvironment(existingComposeId);
-      if (remoteEnv[OBJECT_STORAGE_ACCESS_ENV] || remoteEnv[OBJECT_STORAGE_SECRET_ENV]) {
-        throw existingInfraSecretError("object storage service", objectStorageServiceHost(config), OBJECT_STORAGE_SECRET_ENV);
+    await progress.step("Preparing object storage", async () => {
+      const existingComposeId = await provider.resolveComposeId(environmentId);
+      if (existingComposeId && generatedInfraSecrets.objectStorage) {
+        const remoteEnv = await provider.readComposeEnvironment(existingComposeId);
+        if (remoteEnv[OBJECT_STORAGE_ACCESS_ENV] || remoteEnv[OBJECT_STORAGE_SECRET_ENV]) {
+          throw existingInfraSecretError("object storage service", objectStorageServiceHost(config), OBJECT_STORAGE_SECRET_ENV);
+        }
       }
-    }
-    if (generatedInfraSecrets.objectStorage) {
-      safeGeneratedInfra.objectStorage = true;
-      persistState();
-    }
+      if (generatedInfraSecrets.objectStorage) {
+        safeGeneratedInfra.objectStorage = true;
+        persistState();
+      }
+    });
   }
 
   if (resources.databases.length > 0) {
-    const existingPostgresId = nextState.dokploy.postgresId || await provider.findPostgresId(environmentId);
-    if (existingPostgresId && generatedInfraSecrets.postgres) {
-      throw existingInfraSecretError("Postgres", `${config.app.slug}-postgres`, "NSTACK_POSTGRES_PASSWORD");
-    }
-    if (!existingPostgresId && generatedInfraSecrets.postgres) {
-      safeGeneratedInfra.postgres = true;
+    await progress.step("Creating Postgres instances", async () => {
+      const existingPostgresId = await provider.resolvePostgresId(environmentId);
+      if (existingPostgresId && generatedInfraSecrets.postgres) {
+        throw existingInfraSecretError("Postgres", `${config.app.slug}-postgres`, "NSTACK_POSTGRES_PASSWORD");
+      }
+      if (!existingPostgresId && generatedInfraSecrets.postgres) {
+        safeGeneratedInfra.postgres = true;
+        persistState();
+      }
+      nextState.dokploy.postgresId = await provider.ensurePostgres(environmentId, infra, {
+        passwordGenerated: generatedInfraSecrets.postgres,
+      });
+      await provider.syncPostgresConnection(nextState.dokploy.postgresId, infra);
+      nextState.infra = infra;
       persistState();
-    }
-    nextState.dokploy.postgresId = await provider.ensurePostgres(environmentId, infra, {
-      passwordGenerated: generatedInfraSecrets.postgres,
     });
-    await provider.syncPostgresConnection(nextState.dokploy.postgresId, infra);
-    nextState.infra = infra;
-    persistState();
   }
   if (resources.caches.length > 0) {
-    const existingRedisId = nextState.dokploy.redisId || await provider.findRedisId(environmentId);
-    if (existingRedisId && generatedInfraSecrets.redis) {
-      throw existingInfraSecretError("Redis", `${config.app.slug}-redis`, "NSTACK_REDIS_PASSWORD");
-    }
-    if (!existingRedisId && generatedInfraSecrets.redis) {
-      safeGeneratedInfra.redis = true;
+    await progress.step("Creating Redis instances", async () => {
+      const existingRedisId = await provider.resolveRedisId(environmentId);
+      if (existingRedisId && generatedInfraSecrets.redis) {
+        throw existingInfraSecretError("Redis", `${config.app.slug}-redis`, "NSTACK_REDIS_PASSWORD");
+      }
+      if (!existingRedisId && generatedInfraSecrets.redis) {
+        safeGeneratedInfra.redis = true;
+        persistState();
+      }
+      nextState.dokploy.redisId = await provider.ensureRedis(environmentId, infra, {
+        passwordGenerated: generatedInfraSecrets.redis,
+      });
+      await provider.syncRedisConnection(nextState.dokploy.redisId, infra);
+      nextState.infra = infra;
       persistState();
-    }
-    nextState.dokploy.redisId = await provider.ensureRedis(environmentId, infra, {
-      passwordGenerated: generatedInfraSecrets.redis,
     });
-    await provider.syncRedisConnection(nextState.dokploy.redisId, infra);
-    nextState.infra = infra;
-    persistState();
   }
 
   infraText = renderEncoreInfra({ config, state: nextState, resources, infra, release, secretEnv });
@@ -233,35 +248,35 @@ export async function deploy(options = {}) {
   writeText(infraFile, infraText);
   writeText(composeFile, renderDokployCompose(ctx));
 
-  const composeSource = await provider.resolveComposeSource();
-  const sourceSync = await syncSourceDeployArtifacts(cwd, config, composeSource, timings);
+  const composeSource = await progress.step("Resolving Git source", () => provider.resolveComposeSource());
+  const sourceSync = await progress.step("Pushing source repository", () => syncSourceDeployArtifacts(cwd, config, composeSource, timings));
   if (sourceSync.release) release = sourceSync.release;
-  const composeId = await provider.upsertCompose(
-    environmentId,
-    renderDokployCompose({ ...ctx, state: nextState }),
-    renderComposeEnvironment({
-      resources,
-      infra,
-      secretEnv,
-      buildEnv: composeBuildValues({ config, release, infraText: runtimeInfraText, source: composeSource }),
-    }),
-    { source: composeSource },
-  );
+  const composeId = await progress.step("Updating Dokploy Compose app", () => provider.upsertCompose(
+      environmentId,
+      renderDokployCompose({ ...ctx, state: nextState }),
+      renderComposeEnvironment({
+        resources,
+        infra,
+        secretEnv,
+        buildEnv: composeBuildValues({ config, release, infraText: runtimeInfraText, source: composeSource }),
+      }),
+      { source: composeSource },
+    ));
   nextState.dokploy.composeId = composeId;
   persistFullState();
 
-  nextState.dokploy.schedules = await provider.syncSchedules(composeId, resources.crons, {
-    prune: resources.source === "encore-metadata",
-  });
+  nextState.dokploy.schedules = await progress.step("Syncing Dokploy schedules", () => provider.syncSchedules(composeId, resources.crons, {
+      prune: resources.source === "encore-metadata",
+    }));
   persistFullState();
 
-  await provider.ensureDomains(composeId, resources);
+  await progress.step("Syncing Dokploy domains", () => provider.ensureDomains(composeId, resources));
   nextState.lastAttempt = releaseAttempt(release, { status: "triggering" });
   persistFullState();
 
   let checks = { deployment: null, timings: [] };
   try {
-    await provider.deploy(composeId, release);
+    await progress.step("Triggering Dokploy deployment", () => provider.deploy(composeId, release));
     nextState.lastAttempt = releaseAttempt(release, {
       status: "triggered",
       triggeredAt: nextState.lastAttempt.triggeredAt,
@@ -286,7 +301,7 @@ export async function deploy(options = {}) {
       return report;
     }
 
-    checks = await runReleaseChecks(cwd, config, release, options);
+    checks = await progress.step("Verifying deployment", () => runReleaseChecks(cwd, config, release, options));
     timings.push(...checks.timings);
   } catch (error) {
     nextState.lastAttempt = releaseAttempt(release, {
@@ -320,6 +335,18 @@ export async function deploy(options = {}) {
   if (options.json) console.log(JSON.stringify(report, null, 2));
   else printDeployResult({ config, release, state: nextState });
   return report;
+}
+
+function clearDokployEnvironmentState(dokploy) {
+  delete dokploy.environmentId;
+  clearDokployResourceState(dokploy);
+}
+
+function clearDokployResourceState(dokploy) {
+  delete dokploy.composeId;
+  delete dokploy.postgresId;
+  delete dokploy.redisId;
+  delete dokploy.schedules;
 }
 
 export async function waitForDeployment(options = {}) {
@@ -1017,8 +1044,13 @@ async function completeDeployConfig(config, cwd, options) {
       : options.registry || config.deploy.registry || "";
     const repository = options.repository || config.deploy.source?.repository || inferGitRepository(cwd);
     const branch = options.branch || config.deploy.source?.branch || inferGitBranch(cwd);
-    const url = options.dokployUrl || config.deploy.provider.url || (localOnly ? "" : await prompter.ask("DOKPLOY_URL", "Dokploy URL"));
-    const apiKey = options.dokployApiKey || config.deploy.provider.apiKey || (localOnly ? "" : await prompter.ask("DOKPLOY_API_KEY", "Dokploy API key", { secret: true }));
+    const credentials = await completeDokployCredentials({
+      prompter,
+      localOnly,
+      url: options.dokployUrl || config.deploy.provider.url,
+      apiKey: options.dokployApiKey || config.deploy.provider.apiKey,
+    });
+    const { url, apiKey } = credentials;
     const serverId = options.serverId || config.deploy.provider.serverId || process.env.DOKPLOY_SERVER_ID || "";
     const platform = normalizeTargetPlatform(options.platform || config.deploy.platform).value;
     const projectName = options.project || config.deploy.provider.projectName;
@@ -1058,6 +1090,7 @@ async function completeDeployConfig(config, cwd, options) {
       ...(options.environment || process.env.DOKPLOY_ENVIRONMENT ? { DOKPLOY_ENVIRONMENT: environmentName } : {}),
     };
     mergeEnvFile(path.join(cwd, localEnvPathForTarget(target)), values);
+    ensureGitOrigin(cwd, repository);
     return {
       ...config,
       app: { ...config.app, domain },
@@ -1076,6 +1109,13 @@ async function completeDeployConfig(config, cwd, options) {
   }
 }
 
+async function completeDokployCredentials({ prompter, localOnly, url = "", apiKey = "" }) {
+  if (url && apiKey) return { url, apiKey };
+  if (localOnly) return { url, apiKey };
+  const instance = await promptDokployInstance(prompter, { url, apiKey });
+  return { url: instance.url, apiKey: instance.apiKey };
+}
+
 function sourceConfigFromOptions(existing, options) {
   return {
     sourceType: options.sourceType || existing.sourceType || "",
@@ -1090,6 +1130,13 @@ function sourceConfigFromOptions(existing, options) {
     composePath: options.composePath || existing.composePath || "",
     watchPaths: optionList(options.watchPaths, existing.watchPaths || []),
   };
+}
+
+function ensureGitOrigin(cwd, repository = "") {
+  if (!repository) return;
+  if (safeOutput("git", ["rev-parse", "--is-inside-work-tree"], cwd).trim() !== "true") return;
+  const origin = safeOutput("git", ["remote", "get-url", "origin"], cwd).trim();
+  if (!origin) run("git", ["remote", "add", "origin", repository], { cwd, capture: true });
 }
 
 async function completeSourceConfig({ buildMode, localOnly, source, repository, branch, url, apiKey }) {
@@ -1487,7 +1534,24 @@ function sourceImageTag(source) {
 
 async function syncSourceDeployArtifacts(cwd, config, source = null, timings = []) {
   if (!source || source.sourceType === "raw") return { release: null };
-  const origin = safeOutput("git", ["config", "--get", "remote.origin.url"], cwd).trim();
+  const repositoryUrl = config.deploy.source?.repository || source.repositoryUrl || "";
+  if (repositoryUrl && safeOutput("git", ["rev-parse", "--is-inside-work-tree"], cwd).trim() !== "true") {
+    await timedAsync("source: init git", true, timings, async () => {
+      const branch = config.deploy.source?.branch || source.branch || "main";
+      run("git", ["init"], { cwd, capture: true });
+      run("git", ["checkout", "-B", branch], { cwd, capture: true });
+      run("git", ["add", "."], { cwd, capture: true });
+      const staged = safeOutput("git", ["diff", "--cached", "--name-only"], cwd).trim();
+      if (staged) run("git", ["commit", "-m", "init"], { cwd, capture: true, env: gitCommitEnv() });
+    });
+  }
+  let origin = safeOutput("git", ["config", "--get", "remote.origin.url"], cwd).trim();
+  if (!origin && repositoryUrl) {
+    await timedAsync("source: configure origin", true, timings, async () => {
+      run("git", ["remote", "add", "origin", repositoryUrl], { cwd, capture: true });
+    });
+    origin = repositoryUrl;
+  }
   if (!origin) return { release: null };
 
   const generatedChanges = sourceGeneratedChanges(cwd);
@@ -1505,21 +1569,50 @@ async function syncSourceDeployArtifacts(cwd, config, source = null, timings = [
     await timedAsync("source: commit deploy artifacts", true, timings, async () => {
       run("git", ["add", generatedDir], { cwd, capture: true });
       const staged = safeOutput("git", ["diff", "--cached", "--name-only", "--", generatedDir], cwd).trim();
-      if (staged) run("git", ["commit", "-m", "Update nstack deploy artifacts"], { cwd, capture: true });
+      if (staged) run("git", ["commit", "-m", "Update nstack deploy artifacts"], { cwd, capture: true, env: gitCommitEnv() });
     });
   }
 
   await timedAsync("source: push", true, timings, async () => {
-    const upstream = safeOutput("git", ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], cwd).trim();
-    if (upstream) {
-      run("git", ["push"], { cwd, capture: true });
-      return;
+    try {
+      const upstream = safeOutput("git", ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], cwd).trim();
+      if (upstream) {
+        run("git", ["push"], { cwd, capture: true });
+        return;
+      }
+      const branch = config.deploy.source?.branch || source.branch || safeOutput("git", ["branch", "--show-current"], cwd).trim() || "main";
+      run("git", ["push", "-u", "origin", `HEAD:${branch}`], { cwd, capture: true });
+    } catch (error) {
+      throw sourcePushError({ config, source, error });
     }
-    const branch = safeOutput("git", ["branch", "--show-current"], cwd).trim() || config.deploy.source?.branch || "main";
-    run("git", ["push", "-u", "origin", `HEAD:${branch}`], { cwd, capture: true });
   });
 
   return { release: releaseInfo(config, cwd) };
+}
+
+function sourcePushError({ config, source, error }) {
+  const repository = config.deploy.source?.repository || source.repositoryUrl || "origin";
+  const branch = config.deploy.source?.branch || source.branch || "main";
+  return new Error([
+    `Could not push source repository ${repository}.`,
+    "Create a private repository on your Git provider and push this app before deploying, or fix your git credentials:",
+    `  git remote add origin ${repository}`,
+    "  git add .",
+    "  git commit -m \"init\"",
+    `  git push -u origin ${branch}`,
+    "",
+    `Git reported: ${summarizeError(error)}`,
+  ].join("\n"), { cause: error });
+}
+
+function gitCommitEnv() {
+  return {
+    ...process.env,
+    GIT_AUTHOR_NAME: process.env.GIT_AUTHOR_NAME || "nstack",
+    GIT_AUTHOR_EMAIL: process.env.GIT_AUTHOR_EMAIL || "nstack@example.invalid",
+    GIT_COMMITTER_NAME: process.env.GIT_COMMITTER_NAME || "nstack",
+    GIT_COMMITTER_EMAIL: process.env.GIT_COMMITTER_EMAIL || "nstack@example.invalid",
+  };
 }
 
 function sourceGeneratedChanges(cwd) {
@@ -1527,7 +1620,11 @@ function sourceGeneratedChanges(cwd) {
 }
 
 function sourceOtherChanges(cwd) {
-  return gitPorcelainPaths(cwd).filter((file) => !isGeneratedDeployPath(file));
+  return gitPorcelainPaths(cwd).filter((file) => !isGeneratedDeployPath(file) && !isLocalNstackPath(file));
+}
+
+function isLocalNstackPath(file) {
+  return file === ".nstack" || file.startsWith(".nstack/");
 }
 
 function gitPorcelainPaths(cwd) {
