@@ -1,10 +1,9 @@
-import readline from "node:readline";
+import { confirm, isCancel, password, select, text } from "@clack/prompts";
 import { stdin as input, stdout as output } from "node:process";
 
 export class Prompter {
   constructor({ yes = false } = {}) {
     this.yes = yes || isCi() || input.isTTY !== true;
-    this.rl = null;
   }
 
   async ask(name, message, { defaultValue = "", secret = false } = {}) {
@@ -14,10 +13,9 @@ export class Prompter {
       if (defaultValue !== "") return defaultValue;
       throw new Error(`Missing required value ${name}; pass --${dash(name)} or set ${name}.`);
     }
-    const suffix = defaultValue ? ` (${defaultValue})` : "";
-    const prompt = `${message}${suffix}: `;
-    const answer = secret ? await this.askSecret(prompt) : await this.askVisible(prompt);
-    const value = answer.trim() || defaultValue;
+    const value = secret
+      ? await this.askSecret(message, { required: true })
+      : await this.askVisible(message, { defaultValue, required: true });
     if (!value) throw new Error(`${message} is required.`);
     return value;
   }
@@ -26,20 +24,21 @@ export class Prompter {
     const envValue = process.env[name];
     if (envValue) return envValue;
     if (this.yes) return defaultValue;
-    const suffix = defaultValue ? ` (${defaultValue})` : "";
-    const prompt = `${message}${suffix}: `;
-    const answer = secret ? await this.askSecret(prompt) : await this.askVisible(prompt);
-    return answer.trim() || defaultValue;
+    return secret
+      ? await this.askSecret(message, { required: false })
+      : await this.askVisible(message, { defaultValue, required: false });
   }
 
   async confirm(name, message, { defaultValue = true } = {}) {
     const envValue = process.env[name];
     if (envValue) return !["0", "false", "no", "n"].includes(envValue.toLowerCase());
     if (this.yes) return defaultValue;
-    const suffix = defaultValue ? "Y/n" : "y/N";
-    const answer = (await this.askVisible(`${message} (${suffix}): `)).trim().toLowerCase();
-    if (!answer) return defaultValue;
-    return ["y", "yes", "true", "1"].includes(answer);
+    return this.handleCancel(await confirm({
+      message,
+      initialValue: defaultValue,
+      input,
+      output,
+    }));
   }
 
   async select(name, message, choices, { defaultIndex = 0 } = {}) {
@@ -52,40 +51,57 @@ export class Prompter {
       if (byLabel) return byLabel;
     }
     if (this.yes) return choices[defaultIndex] || choices[0];
-    output.write(`${message}:\n`);
-    choices.forEach((choice, index) => output.write(`  ${index + 1}. ${choice.label}\n`));
-    const answer = (await this.askVisible(`Choose ${defaultIndex + 1}: `)).trim();
-    if (!answer) return choices[defaultIndex] || choices[0];
-    const index = Number(answer) - 1;
-    if (Number.isInteger(index) && choices[index]) return choices[index];
-    const byValue = choices.find((choice) => choice.value === answer);
-    if (byValue) return byValue;
-    throw new Error(`Invalid choice: ${answer}`);
+    const selectedValue = this.handleCancel(await select({
+      message,
+      options: choices.map((choice) => ({
+        value: choice.value,
+        label: choice.label,
+        hint: choice.hint,
+        disabled: choice.disabled,
+      })),
+      initialValue: (choices[defaultIndex] || choices[0]).value,
+      input,
+      output,
+    }));
+    return choices.find((choice) => choice.value === selectedValue) || choices[defaultIndex] || choices[0];
   }
 
-  askVisible(prompt) {
-    if (!this.rl) this.rl = readline.createInterface({ input, output });
-    return new Promise((resolve) => this.rl.question(prompt, resolve));
+  async askVisible(message, { defaultValue = "", required = true } = {}) {
+    const answer = this.handleCancel(await text({
+      message,
+      placeholder: defaultValue || undefined,
+      defaultValue: defaultValue || undefined,
+      initialValue: defaultValue || undefined,
+      validate(value) {
+        if (required && !String(value || "").trim()) return `${message} is required.`;
+        return undefined;
+      },
+      input,
+      output,
+    }));
+    return String(answer || "").trim() || defaultValue;
   }
 
-  askSecret(prompt) {
-    this.close();
-    return new Promise((resolve) => {
-      const rl = readline.createInterface({ input, output, terminal: true });
-      rl._writeToOutput = (text) => {
-        if (text === prompt) output.write(text);
-      };
-      rl.question(prompt, (answer) => {
-        rl.close();
-        output.write("\n");
-        resolve(answer);
-      });
-    });
+  async askSecret(message, { required = true } = {}) {
+    const answer = this.handleCancel(await password({
+      message,
+      validate(value) {
+        if (required && !String(value || "").trim()) return `${message} is required.`;
+        return undefined;
+      },
+      input,
+      output,
+    }));
+    return String(answer || "").trim();
+  }
+
+  handleCancel(value) {
+    if (!isCancel(value)) return value;
+    throw new Error("Prompt cancelled.");
   }
 
   close() {
-    this.rl?.close();
-    this.rl = null;
+    // Clack manages prompt lifecycle per prompt.
   }
 }
 

@@ -947,7 +947,7 @@ async function loadConfiguredProviderIds(client, providers) {
     if (!endpoint) return [type, null];
     try {
       const values = asList(await client.trpcGet(endpoint));
-      return [type, new Set(values.map((value) => configuredProviderListId(value, type)).filter(Boolean))];
+      return [type, values.filter((value) => configuredProviderListId(value, type))];
     } catch (error) {
       if (!isUnknownEndpoint(error)) throw error;
       return [type, null];
@@ -958,11 +958,13 @@ async function loadConfiguredProviderIds(client, providers) {
 
 function annotateSourceProvider(provider, configuredIdsByType) {
   const type = provider.providerType;
-  const configuredIds = configuredIdsByType[type];
-  if (!(configuredIds instanceof Set)) return provider;
+  const configuredRecords = configuredIdsByType[type];
+  if (!Array.isArray(configuredRecords)) return provider;
+  const configured = configuredRecords.find((record) => configuredProviderListId(record, type) === providerSpecificId(provider, type)) || null;
   return {
     ...provider,
-    __nstackSourceConfigured: configuredIds.has(providerSpecificId(provider, type)),
+    __nstackSourceConfigured: Boolean(configured),
+    ...(configured ? { __nstackConfiguredProvider: configured } : {}),
   };
 }
 

@@ -22,6 +22,10 @@ if [ "$1" = "--version" ]; then
   printf '10.33.2\\n'
   exit 0
 fi
+if [ "$1" = "help" ] && [ "$2" = "approve-builds" ]; then
+  printf '      --all                Approve all pending dependencies without interactive prompts\\n'
+  exit 0
+fi
 printf '%s\\n' "$*" >> "$NSTACK_FAKE_PNPM_LOG"
 if [ "$1" = "install" ]; then
   printf 'lockfileVersion: "9.0"\\n' > pnpm-lock.yaml

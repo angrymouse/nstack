@@ -17,7 +17,7 @@ import {
 } from "./config.js";
 import { doctor } from "./doctor.js";
 import { openTarget } from "./open.js";
-import { packageManagerInstallCommands, promptPackageManager } from "./package-manager.js";
+import { installPackageManagerDependencies, promptPackageManager } from "./package-manager.js";
 import { pull } from "./pull.js";
 import { runSecretCommand } from "./secrets.js";
 import { showStatus } from "./status.js";
@@ -184,12 +184,11 @@ async function initPackageManager(options = {}) {
 
 function installGeneratedDependencies(cwd, options = {}, packageManager) {
   if (options.skipInstall || options.noInstall) return { skipped: true };
-  const commands = packageManagerInstallCommands(packageManager);
-  for (const command of commands) run(command.command, command.args, { cwd, capture: true });
+  const commands = installPackageManagerDependencies(packageManager, { cwd });
   return {
     skipped: false,
     packageManager: packageManager.name,
-    commands: commands.map((command) => command.label),
+    commands,
   };
 }
 
@@ -421,7 +420,7 @@ async function promptRepositoryOwner({ prompter, choice, inferred = null }) {
   const envOwner = process.env.NSTACK_GIT_OWNER || process.env.NSTACK_REPOSITORY_OWNER || "";
   if (envOwner) return normalizeRepositoryOwner(envOwner);
 
-  const choices = repositoryOwnerChoices(choice, inferred);
+  const choices = await loadRepositoryOwnerChoices(choice, inferred);
   if (choices.length > 0 && !prompter.yes) {
     const manual = { label: "Enter manually", value: "__manual_owner__" };
     const selected = await prompter.select("NSTACK_GIT_OWNER", "Git user/org", [...choices, manual]);
@@ -451,9 +450,10 @@ async function promptGitHost({ prompter, sourceType, inferred = null }) {
   return cleanHost(host).toLowerCase();
 }
 
-function repositoryOwnerChoices(choice, inferred = null) {
+export async function loadRepositoryOwnerChoices(choice, inferred = null) {
   const owners = [
     ...(inferred && inferred.host === choice.host ? [inferred.owner] : []),
+    ...(await creatableRepositoryOwners(choice)),
     ...providerOwnerCandidates(choice.provider, choice.sourceType),
   ].map(normalizeRepositoryOwner).filter(Boolean);
   return [...new Set(owners)].map((owner) => ({ label: owner, value: owner }));
@@ -461,13 +461,133 @@ function repositoryOwnerChoices(choice, inferred = null) {
 
 function providerOwnerCandidates(provider, sourceType) {
   const details = provider?.[sourceType] || {};
+  const configured = provider?.__nstackConfiguredProvider || {};
+  const configuredDetails = configured?.[sourceType] || {};
   const keys = {
     github: ["owner", "organization", "org", "login", "username", "githubOwner", "githubOrganization", "githubUsername"],
     gitlab: ["owner", "namespace", "groupName", "group", "username", "gitlabOwner", "gitlabNamespace", "gitlabUsername"],
     bitbucket: ["owner", "workspace", "workspaceName", "username", "bitbucketOwner", "bitbucketWorkspace", "bitbucketWorkspaceName", "bitbucketUsername"],
     gitea: ["owner", "organization", "org", "username", "giteaOwner", "giteaOrganization", "giteaUsername"],
   }[sourceType] || [];
-  return keys.map((key) => details[key]).filter((value) => typeof value === "string" && value.trim());
+  return [details, configured, configuredDetails]
+    .flatMap((value) => keys.map((key) => value?.[key]))
+    .filter((value) => typeof value === "string" && value.trim());
+}
+
+async function creatableRepositoryOwners(choice) {
+  const token = providerAccessToken(choice.provider, choice.sourceType);
+  if (!token) return [];
+  try {
+    if (choice.sourceType === "github") return await githubCreatableOwners(token);
+    if (choice.sourceType === "gitlab") return await gitlabCreatableOwners(choice.host, token);
+    if (choice.sourceType === "bitbucket") return await bitbucketCreatableOwners(token);
+    if (choice.sourceType === "gitea") return await giteaCreatableOwners(choice.host, token);
+  } catch {
+    return [];
+  }
+  return [];
+}
+
+function providerAccessToken(provider, sourceType) {
+  const details = provider?.[sourceType] || {};
+  const configured = provider?.__nstackConfiguredProvider || {};
+  const configuredDetails = configured?.[sourceType] || {};
+  const keys = ["accessToken", "token", "oauthToken", "personalAccessToken", "apiToken", "pat"];
+  for (const source of [details, configured, configuredDetails]) {
+    for (const key of keys) {
+      const value = source?.[key];
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
+  }
+  return "";
+}
+
+async function githubCreatableOwners(token) {
+  const query = `query {
+    viewer {
+      login
+      organizations(first: 100) {
+        nodes {
+          login
+          viewerCanCreateRepositories
+        }
+      }
+    }
+  }`;
+  const data = await fetchJson("https://api.github.com/graphql", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ query }),
+  });
+  const viewer = data?.data?.viewer || {};
+  return [
+    viewer.login,
+    ...asList(viewer.organizations?.nodes)
+      .filter((org) => org.viewerCanCreateRepositories)
+      .map((org) => org.login),
+  ].filter(Boolean);
+}
+
+async function gitlabCreatableOwners(host, token) {
+  const base = gitApiBase(host);
+  const headers = { authorization: `Bearer ${token}`, "PRIVATE-TOKEN": token };
+  const [user, namespaces] = await Promise.all([
+    fetchJson(`${base}/api/v4/user`, { headers }),
+    fetchJson(`${base}/api/v4/namespaces?per_page=100`, { headers }),
+  ]);
+  return [
+    user?.username,
+    ...asList(namespaces).map((namespace) => namespace.full_path || namespace.path),
+  ].filter(Boolean);
+}
+
+async function bitbucketCreatableOwners(token) {
+  const headers = { authorization: `Bearer ${token}` };
+  const permissions = await fetchJson("https://api.bitbucket.org/2.0/user/permissions/workspaces?pagelen=100", { headers });
+  return asList(permissions?.values)
+    .filter((item) => ["admin", "owner"].includes(String(item.permission || "").toLowerCase()))
+    .map((item) => item.workspace?.slug || item.workspace?.name)
+    .filter(Boolean);
+}
+
+async function giteaCreatableOwners(host, token) {
+  const base = gitApiBase(host);
+  const headers = { authorization: `token ${token}` };
+  const [user, orgs] = await Promise.all([
+    fetchJson(`${base}/api/v1/user`, { headers }),
+    fetchJson(`${base}/api/v1/user/orgs`, { headers }),
+  ]);
+  const orgOwners = [];
+  for (const org of asList(orgs)) {
+    const name = org.username || org.name;
+    if (!name) continue;
+    const teams = await fetchJson(`${base}/api/v1/orgs/${encodeURIComponent(name)}/teams`, { headers }).catch(() => null);
+    if (!Array.isArray(teams) || teams.length === 0 || teams.some(giteaTeamCanCreateRepos)) orgOwners.push(name);
+  }
+  return [user?.login || user?.username, ...orgOwners].filter(Boolean);
+}
+
+function giteaTeamCanCreateRepos(team) {
+  if (team?.can_create_org_repo === true) return true;
+  const permission = String(team?.permission || "").toLowerCase();
+  return ["admin", "owner"].includes(permission);
+}
+
+function gitApiBase(host) {
+  return `https://${cleanHost(host).replace(/\/+$/, "")}`;
+}
+
+async function fetchJson(url, init = {}) {
+  const response = await fetch(url, init);
+  if (!response.ok) throw new Error(`GET ${url} failed: ${response.status}`);
+  return response.json();
+}
+
+function asList(value) {
+  return Array.isArray(value) ? value : [];
 }
 
 function repositoryUrlForSource({ sourceType, host = "", owner, repository }) {

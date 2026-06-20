@@ -12,6 +12,9 @@
     "smoke": "node bin/nstack.js help && node bin/nstack.js init /tmp/nstack-smoke --force --yes && node --check /tmp/nstack-smoke/nstack.config.mjs",
     "test": "node --test"
   },
+  "dependencies": {
+    "@clack/prompts": "^1.6.0"
+  },
   "engines": {
     "node": ">=22"
   }

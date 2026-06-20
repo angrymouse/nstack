@@ -1,6 +1,6 @@
 import os from "node:os";
 import path from "node:path";
-import { commandOutput, readJSON, writeJSON } from "./util.js";
+import { commandOutput, readJSON, readText, run, writeJSON, writeText } from "./util.js";
 
 const schemaVersion = 1;
 const supportedPackageManagers = ["pnpm"];
@@ -70,10 +70,110 @@ export function packageManagerInstallCommands(packageManager) {
   if (name === "pnpm") {
     return [
       { command: "pnpm", args: ["install", "--no-frozen-lockfile"], label: "pnpm install --no-frozen-lockfile" },
-      { command: "pnpm", args: ["approve-builds", "--all"], label: "pnpm approve-builds --all" },
+      { command: "pnpm", args: ["approve-builds"], label: "pnpm approve-builds" },
     ];
   }
   throw unsupportedPackageManagerError(name);
+}
+
+export function installPackageManagerDependencies(packageManager, { cwd = process.cwd() } = {}) {
+  const name = normalizePackageManager(packageManager?.name || packageManager);
+  if (name !== "pnpm") throw unsupportedPackageManagerError(name);
+
+  const labels = ["pnpm install --no-frozen-lockfile"];
+  run("pnpm", ["install", "--no-frozen-lockfile"], { cwd, capture: true });
+  labels.push(...approvePnpmBuilds(cwd));
+  return labels;
+}
+
+function approvePnpmBuilds(cwd) {
+  if (pnpmApproveBuildsSupportsAll(cwd)) {
+    run("pnpm", ["approve-builds", "--all"], { cwd, capture: true });
+    return ["pnpm approve-builds --all"];
+  }
+
+  const ignored = pnpmIgnoredBuilds(cwd);
+  if (ignored.length === 0) return ["pnpm ignored-builds"];
+  approvePnpmWorkspaceBuilds(cwd, ignored);
+  run("pnpm", ["rebuild"], { cwd, capture: true });
+  return ["pnpm ignored-builds", "pnpm rebuild"];
+}
+
+function pnpmApproveBuildsSupportsAll(cwd) {
+  try {
+    return /^\s*--all\b/m.test(commandOutput("pnpm", ["help", "approve-builds"], { cwd }));
+  } catch {
+    return false;
+  }
+}
+
+function pnpmIgnoredBuilds(cwd) {
+  const output = commandOutput("pnpm", ["ignored-builds"], { cwd });
+  return output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => (
+      line &&
+      line !== "None" &&
+      !line.endsWith(":") &&
+      !line.startsWith("hint:")
+    ));
+}
+
+function approvePnpmWorkspaceBuilds(cwd, packages) {
+  const workspaceFile = path.join(cwd, "pnpm-workspace.yaml");
+  const unique = [...new Set(packages.map(String).filter(Boolean))].sort();
+  const current = readText(workspaceFile, "");
+  writeText(workspaceFile, updateYamlList(current, "onlyBuiltDependencies", unique));
+}
+
+function updateYamlList(text, key, values) {
+  const lines = String(text || "").split(/\r?\n/);
+  if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+
+  const start = lines.findIndex((line) => line.trim() === `${key}:` && !/^\s/.test(line));
+  const current = start === -1 ? [] : readYamlList(lines, start);
+  const merged = [...new Set([...current, ...values])].sort();
+  const replacement = [`${key}:`, ...merged.map((value) => `  - ${yamlScalar(value)}`)];
+
+  if (start === -1) {
+    if (lines.length > 0) lines.push("");
+    lines.push(...replacement);
+    return `${lines.join("\n")}\n`;
+  }
+
+  let end = start + 1;
+  while (end < lines.length && (/^\s/.test(lines[end]) || lines[end].trim() === "")) end += 1;
+  lines.splice(start, end - start, ...replacement);
+  return `${lines.join("\n")}\n`;
+}
+
+function readYamlList(lines, start) {
+  const values = [];
+  for (let i = start + 1; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (!/^\s/.test(line) && line.trim()) break;
+    const match = line.match(/^\s*-\s+(.+?)\s*$/);
+    if (match) values.push(unquoteYamlScalar(match[1]));
+  }
+  return values;
+}
+
+function yamlScalar(value) {
+  const text = String(value);
+  return /^[A-Za-z0-9_.-]+$/.test(text) ? text : JSON.stringify(text);
+}
+
+function unquoteYamlScalar(value) {
+  const text = String(value || "").trim();
+  if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return text.slice(1, -1);
+    }
+  }
+  return text;
 }
 
 export function availablePackageManagers() {
