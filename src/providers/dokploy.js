@@ -341,9 +341,9 @@ export class DokployProvider {
     await this.client.apiPost("domain.create", data);
   }
 
-  async syncSchedules(composeId, crons, { prune = true } = {}) {
+  async syncSchedules(composeId, crons, { prune = true, shouldPrune = null } = {}) {
     const previous = this.state.dokploy?.schedules || {};
-    if (crons.length === 0 && !prune && Object.keys(previous).length === 0) return {};
+    if (crons.length === 0 && !prune) return { ...previous };
 
     const existing = asList(await this.client.apiGet("schedule.list", {
       id: composeId,
@@ -351,6 +351,7 @@ export class DokployProvider {
     }));
     const byName = new Map(existing.map((schedule) => [schedule.name, schedule]));
     const next = {};
+    const preserved = {};
     const desiredNames = new Set();
 
     for (const { cron, payload } of expectedComposeSchedules(this.config, composeId, crons)) {
@@ -372,16 +373,26 @@ export class DokployProvider {
       for (const schedule of existing) {
         const scheduleId = idOf(schedule, ["scheduleId", "id"]);
         if (!scheduleId || !schedule.name?.startsWith(managedPrefix) || desiredNames.has(schedule.name)) continue;
+        const resource = scheduleCleanupResource(schedule, managedPrefix);
+        if (shouldPrune && !await shouldPrune(resource)) {
+          preserved[resource.name] = scheduleId;
+          continue;
+        }
         await this.client.apiPost("schedule.delete", { scheduleId });
         deleted.add(scheduleId);
       }
       for (const [cronName, scheduleId] of Object.entries(previous)) {
         if (!scheduleId || next[cronName] || deleted.has(scheduleId)) continue;
+        if (shouldPrune && !await shouldPrune({ type: "cron", name: cronName, id: scheduleId })) {
+          preserved[cronName] = scheduleId;
+          continue;
+        }
         await this.client.apiPost("schedule.delete", { scheduleId });
       }
     }
 
-    return next;
+    if (!prune) return { ...previous, ...next };
+    return { ...preserved, ...next };
   }
 
   async findScheduleId(composeId, name) {
@@ -1291,6 +1302,15 @@ function scheduleName(config, cron) {
 
 function scheduleNamePrefix(config) {
   return `nstack-${config.app.slug}-`;
+}
+
+function scheduleCleanupResource(schedule, managedPrefix) {
+  const name = String(schedule?.name || "");
+  return {
+    type: "cron",
+    name: name.startsWith(managedPrefix) ? name.slice(managedPrefix.length) : name,
+    id: idOf(schedule, ["scheduleId", "id"]),
+  };
 }
 
 function cronExpressionForEncoreCron(cron) {

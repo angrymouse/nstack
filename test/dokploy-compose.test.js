@@ -105,6 +105,47 @@ test("ensureRedis creates a Dokploy-native Dragonfly cache resource", async () =
   assert.deepEqual(deploy.body, { redisId: "redis-1" });
 });
 
+test("ensurePostgres and ensureRedis reuse existing Dokploy resources by name", async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    const parsed = new URL(String(url));
+    const body = init.body ? JSON.parse(init.body) : null;
+    calls.push({ method: init.method || "GET", path: parsed.pathname, body });
+
+    if ((init.method || "GET") === "GET" && parsed.pathname === "/api/trpc/postgres.search") {
+      return Response.json({ json: [{ postgresId: "postgres-1", name: "reuse-app-postgres" }] });
+    }
+    if ((init.method || "GET") === "GET" && parsed.pathname === "/api/trpc/redis.search") {
+      return Response.json({ json: [{ redisId: "redis-1", name: "reuse-app-redis" }] });
+    }
+    return Response.json({ json: {} });
+  };
+
+  try {
+    const provider = new DokployProvider({
+      config: {
+        app: { slug: "reuse-app" },
+        deploy: { provider: { url: "https://dokploy.example.test", apiKey: "dummy" } },
+      },
+      state: { dokploy: {} },
+    });
+    assert.equal(await provider.ensurePostgres("environment-1", {
+      postgres: { database: "app", user: "nstack", password: "postgres-secret" },
+    }), "postgres-1");
+    assert.equal(await provider.ensureRedis("environment-1", {
+      redis: { password: "redis-secret" },
+    }), "redis-1");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(calls.some((call) => call.path === "/api/postgres.create"), false);
+  assert.equal(calls.some((call) => call.path === "/api/redis.create"), false);
+  assert.equal(calls.some((call) => call.path === "/api/postgres.deploy"), false);
+  assert.equal(calls.some((call) => call.path === "/api/redis.deploy"), false);
+});
+
 test("expected Compose domains include object storage route only for public buckets", () => {
   const config = { app: { domain: "bucket.example.test" } };
   assert.deepEqual(

@@ -19,7 +19,7 @@ export async function loadConfig(cwd = process.cwd(), options = {}) {
     const mod = await import(`${pathToFileURL(configFile).href}?t=${Date.now()}`);
     const config = mod.default || mod.config;
     if (!config || typeof config !== "object") throw new Error("nstack.config.mjs must export a config object.");
-    return normalizeConfig(config, { target: requestedTarget });
+    return normalizeConfig(withExportedResourceCleanupIgnore(config, mod.nstackResourceCleanupIgnore), { target: requestedTarget });
   } finally {
     restoreEnv();
   }
@@ -51,6 +51,9 @@ export function normalizeConfig(config, options = {}) {
       buildMode: normalizeBuildMode(process.env.NSTACK_BUILD_MODE || deploy.buildMode, process.env.NSTACK_REGISTRY || deploy.registry || ""),
       platform: process.env.NSTACK_PLATFORM || process.env.PROD_PLATFORM || deploy.platform || "linux/amd64",
       dnsValidation: normalizeDnsValidation(process.env.NSTACK_DNS_VALIDATION || deploy.dnsValidation || deploy.domainValidation || ""),
+      resourceCleanup: {
+        ignore: normalizeResourceCleanupIgnore(deploy.resourceCleanup?.ignore),
+      },
       source: normalizeSource(deploy.source || {}),
       provider: {
         type: provider.type || "dokploy",
@@ -70,6 +73,55 @@ export function normalizeConfig(config, options = {}) {
       ],
     },
   };
+}
+
+function withExportedResourceCleanupIgnore(config, exportedIgnore) {
+  const ignore = normalizeResourceCleanupIgnore(exportedIgnore);
+  if (ignore.length === 0) return config;
+  const deploy = config.deploy || {};
+  const resourceCleanup = deploy.resourceCleanup || {};
+  return {
+    ...config,
+    deploy: {
+      ...deploy,
+      resourceCleanup: {
+        ...resourceCleanup,
+        ignore: [
+          ...(Array.isArray(resourceCleanup.ignore) ? resourceCleanup.ignore : []),
+          ...ignore,
+        ],
+      },
+    },
+  };
+}
+
+function normalizeResourceCleanupIgnore(value = []) {
+  const entries = Array.isArray(value) ? value : [];
+  const seen = new Set();
+  const normalized = [];
+  for (const entry of entries) {
+    const resource = normalizeResourceCleanupIgnoreEntry(entry);
+    if (!resource) continue;
+    const key = `${resource.type}\0${resource.name}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalized.push(resource);
+  }
+  return normalized;
+}
+
+function normalizeResourceCleanupIgnoreEntry(entry) {
+  if (typeof entry === "string") {
+    const [type, ...rest] = entry.split(":");
+    const name = rest.join(":");
+    if (!type || !name) return null;
+    return { type: type.trim().toLowerCase(), name: name.trim() };
+  }
+  if (!entry || typeof entry !== "object") return null;
+  const type = String(entry.type || entry.kind || entry.resourceType || "").trim();
+  const name = String(entry.name || entry.resource || entry.id || "").trim();
+  if (!type || !name) return null;
+  return { type: type.toLowerCase(), name };
 }
 
 export function normalizeBuildMode(value, registry = "") {

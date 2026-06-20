@@ -747,6 +747,336 @@ export const db = new SQLDatabase("app", {});
   assert.deepEqual(state.dokploy.schedules, {});
 });
 
+test("deploy prunes Dokploy resources removed from Encore metadata", async () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "nstack-prune-resources-"));
+  const fakeBin = path.join(cwd, "bin");
+  mkdirSync(path.join(cwd, ".nstack"), { recursive: true });
+  mkdirSync(path.join(cwd, "backend", "api"), { recursive: true });
+  mkdirSync(path.join(cwd, "frontend"), { recursive: true });
+  mkdirSync(fakeBin, { recursive: true });
+  writeFileSync(path.join(cwd, "nstack.config.mjs"), `export default {
+  app: { name: "Prune Resources", slug: "prune-resources" },
+  paths: { backend: "backend", frontend: "frontend", frontendDockerfile: "frontend/Dockerfile" },
+  deploy: { provider: { type: "dokploy" } },
+  verify: { endpoints: [] },
+};\n`);
+  writeFileSync(path.join(cwd, "backend", "api", "status.ts"), `export const ok = true;\n`);
+  writeFileSync(path.join(cwd, "backend", "Dockerfile"), "FROM scratch\n");
+  writeFileSync(path.join(cwd, "frontend", "Dockerfile"), "FROM scratch\n");
+  writeFileSync(path.join(fakeBin, "encore"), `#!/usr/bin/env node
+const args = process.argv.slice(2);
+if (args[0] === "version") {
+  console.log("encore v1.0.0");
+  process.exit(0);
+}
+if (args[0] === "debug") {
+  console.log(JSON.stringify({ svcs: [], sql_databases: [], cache_clusters: [], pubsub_topics: [], buckets: [], pkgs: [], cron_jobs: [] }));
+  process.exit(0);
+}
+process.exit(0);
+`);
+  chmodSync(path.join(fakeBin, "encore"), 0o755);
+  writeFileSync(path.join(cwd, ".nstack", "state.json"), `${JSON.stringify({
+    dokploy: {
+      projectId: "project-1",
+      environmentId: "environment-1",
+      composeId: "compose-1",
+      postgresId: "postgres-1",
+      redisId: "redis-1",
+      schedules: { cleanup: "schedule-old" },
+    },
+    infra: {
+      postgres: {
+        appName: "prune-resources-postgres",
+        host: "prune-resources-postgres:5432",
+        database: "app",
+        user: "nstack",
+        password: "postgres-secret",
+      },
+      redis: {
+        appName: "prune-resources-redis",
+        host: "prune-resources-redis:6379",
+        password: "redis-secret",
+      },
+      objectStorage: {
+        appName: "prune-resources-rustfs",
+        host: "prune-resources-rustfs:9000",
+        endpoint: "http://prune-resources-rustfs:9000",
+        accessKey: "minio-access",
+        secretKey: "minio-secret",
+        region: "us-east-1",
+      },
+    },
+  }, null, 2)}\n`);
+
+  const envKeys = ["NSTACK_DOMAIN", "NSTACK_REGISTRY", "DOKPLOY_URL", "DOKPLOY_API_KEY", "PATH"];
+  const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+  process.env.NSTACK_DOMAIN = "prune-resources.example.test";
+  process.env.NSTACK_REGISTRY = "ghcr.io/acme/prune-resources";
+  process.env.DOKPLOY_URL = "https://dokploy.example.test";
+  process.env.DOKPLOY_API_KEY = "dummy";
+  process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH || ""}`;
+
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    const parsed = new URL(String(url));
+    const endpoint = parsed.pathname.replace(/^\/api\/(?:trpc\/)?/, "");
+    const method = init.method || "GET";
+    const body = init.body ? JSON.parse(init.body) : null;
+    calls.push({ method, endpoint, body });
+    if (method === "GET") {
+      if (endpoint === "project.all") return Response.json({ json: [{ projectId: "project-1", name: "Prune Resources" }] });
+      if (endpoint === "environment.byProjectId") return Response.json({ json: [{ environmentId: "environment-1", name: "production" }] });
+      if (endpoint === "postgres.one") return Response.json({ json: { postgresId: "postgres-1", name: "prune-resources-postgres" } });
+      if (endpoint === "redis.one") return Response.json({ json: { redisId: "redis-1", name: "prune-resources-redis" } });
+      if (endpoint === "compose.one") return Response.json({ json: { composeId: "compose-1", name: "prune-resources-app" } });
+      if (endpoint === "schedule.list") return Response.json({ json: [] });
+      if (endpoint === "domain.byComposeId" || endpoint === "gitProvider.getAll" || endpoint.endsWith(".search")) return Response.json({ json: [] });
+      if (endpoint === "settings.getIp") return Response.json({ json: "203.0.113.10" });
+    }
+    if (endpoint === "domain.validateDomain") return Response.json({ json: { isValid: true, resolvedIp: "203.0.113.10" } });
+    if (endpoint === "domain.create") return Response.json({ json: { domainId: "domain-1" } });
+    return Response.json({ json: {} });
+  };
+
+  try {
+    await deploy({
+      cwd,
+      skipBuild: true,
+      skipVerify: true,
+      skipStatus: true,
+      noWait: true,
+      yes: true,
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const key of envKeys) {
+      if (originalEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = originalEnv[key];
+    }
+  }
+
+  assert.equal(calls.some((call) => call.endpoint === "postgres.remove" && call.body.postgresId === "postgres-1"), true);
+  assert.equal(calls.some((call) => call.endpoint === "redis.remove" && call.body.redisId === "redis-1"), true);
+  assert.equal(calls.some((call) => call.endpoint === "schedule.delete" && call.body.scheduleId === "schedule-old"), true);
+  assert.equal(calls.some((call) => call.endpoint === "postgres.create"), false);
+  assert.equal(calls.some((call) => call.endpoint === "redis.create"), false);
+
+  const state = JSON.parse(readFileSync(path.join(cwd, ".nstack", "state.json"), "utf8"));
+  assert.equal(state.dokploy.postgresId, undefined);
+  assert.equal(state.dokploy.redisId, undefined);
+  assert.deepEqual(state.dokploy.schedules, {});
+  assert.equal(state.infra, undefined);
+});
+
+test("deploy records declined resource cleanup in config", async () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "nstack-decline-cleanup-"));
+  const fakeBin = path.join(cwd, "bin");
+  mkdirSync(path.join(cwd, ".nstack"), { recursive: true });
+  mkdirSync(path.join(cwd, "backend", "api"), { recursive: true });
+  mkdirSync(path.join(cwd, "frontend"), { recursive: true });
+  mkdirSync(fakeBin, { recursive: true });
+  writeFileSync(path.join(cwd, "nstack.config.mjs"), `export default {
+  app: { name: "Decline Cleanup", slug: "decline-cleanup" },
+  paths: { backend: "backend", frontend: "frontend", frontendDockerfile: "frontend/Dockerfile" },
+  deploy: { provider: { type: "dokploy" } },
+  verify: { endpoints: [] },
+};\n`);
+  writeFileSync(path.join(cwd, "backend", "api", "status.ts"), `export const ok = true;\n`);
+  writeFileSync(path.join(cwd, "backend", "Dockerfile"), "FROM scratch\n");
+  writeFileSync(path.join(cwd, "frontend", "Dockerfile"), "FROM scratch\n");
+  writeFileSync(path.join(fakeBin, "encore"), `#!/usr/bin/env node
+const args = process.argv.slice(2);
+if (args[0] === "version") {
+  console.log("encore v1.0.0");
+  process.exit(0);
+}
+if (args[0] === "debug") {
+  console.log(JSON.stringify({ svcs: [], sql_databases: [], cache_clusters: [], pubsub_topics: [], buckets: [], pkgs: [], cron_jobs: [] }));
+  process.exit(0);
+}
+process.exit(0);
+`);
+  chmodSync(path.join(fakeBin, "encore"), 0o755);
+  writeFileSync(path.join(cwd, ".nstack", "state.json"), `${JSON.stringify({
+    dokploy: {
+      projectId: "project-1",
+      environmentId: "environment-1",
+      composeId: "compose-1",
+      postgresId: "postgres-1",
+    },
+    infra: {
+      postgres: {
+        appName: "decline-cleanup-postgres",
+        host: "decline-cleanup-postgres:5432",
+        database: "app",
+        user: "nstack",
+        password: "postgres-secret",
+      },
+    },
+  }, null, 2)}\n`);
+
+  const envKeys = ["NSTACK_DOMAIN", "NSTACK_REGISTRY", "DOKPLOY_URL", "DOKPLOY_API_KEY", "NSTACK_REMOVE_DB_RESOURCE_DECLINE_CLEANUP_POSTGRES", "PATH"];
+  const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+  process.env.NSTACK_DOMAIN = "decline-cleanup.example.test";
+  process.env.NSTACK_REGISTRY = "ghcr.io/acme/decline-cleanup";
+  process.env.DOKPLOY_URL = "https://dokploy.example.test";
+  process.env.DOKPLOY_API_KEY = "dummy";
+  process.env.NSTACK_REMOVE_DB_RESOURCE_DECLINE_CLEANUP_POSTGRES = "false";
+  process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH || ""}`;
+
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    const parsed = new URL(String(url));
+    const endpoint = parsed.pathname.replace(/^\/api\/(?:trpc\/)?/, "");
+    const method = init.method || "GET";
+    const body = init.body ? JSON.parse(init.body) : null;
+    calls.push({ method, endpoint, body });
+    if (method === "GET") {
+      if (endpoint === "project.all") return Response.json({ json: [{ projectId: "project-1", name: "Decline Cleanup" }] });
+      if (endpoint === "environment.byProjectId") return Response.json({ json: [{ environmentId: "environment-1", name: "production" }] });
+      if (endpoint === "postgres.one") return Response.json({ json: { postgresId: "postgres-1", name: "decline-cleanup-postgres" } });
+      if (endpoint === "compose.one") return Response.json({ json: { composeId: "compose-1", name: "decline-cleanup-app" } });
+      if (endpoint === "schedule.list") return Response.json({ json: [] });
+      if (endpoint === "domain.byComposeId" || endpoint === "gitProvider.getAll" || endpoint.endsWith(".search")) return Response.json({ json: [] });
+      if (endpoint === "settings.getIp") return Response.json({ json: "203.0.113.10" });
+    }
+    if (endpoint === "domain.validateDomain") return Response.json({ json: { isValid: true, resolvedIp: "203.0.113.10" } });
+    if (endpoint === "domain.create") return Response.json({ json: { domainId: "domain-1" } });
+    return Response.json({ json: {} });
+  };
+
+  try {
+    await deploy({
+      cwd,
+      skipBuild: true,
+      skipVerify: true,
+      skipStatus: true,
+      noWait: true,
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const key of envKeys) {
+      if (originalEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = originalEnv[key];
+    }
+  }
+
+  assert.equal(calls.some((call) => call.endpoint === "postgres.remove"), false);
+  const state = JSON.parse(readFileSync(path.join(cwd, ".nstack", "state.json"), "utf8"));
+  assert.equal(state.dokploy.postgresId, "postgres-1");
+  assert.equal(state.infra.postgres.password, "postgres-secret");
+  const config = readFileSync(path.join(cwd, "nstack.config.mjs"), "utf8");
+  assert.match(config, /export const nstackResourceCleanupIgnore = \[/);
+  assert.match(config, /"type": "db"/);
+  assert.match(config, /"name": "decline-cleanup-postgres"/);
+});
+
+test("source-backed deploy skips resource cleanup", async () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "nstack-source-cleanup-skip-"));
+  const fakeBin = path.join(cwd, "bin");
+  mkdirSync(path.join(cwd, ".nstack"), { recursive: true });
+  mkdirSync(path.join(cwd, "backend", "api"), { recursive: true });
+  mkdirSync(path.join(cwd, "frontend"), { recursive: true });
+  mkdirSync(fakeBin, { recursive: true });
+  writeFileSync(path.join(cwd, "nstack.config.mjs"), `export default {
+  app: { name: "Source Cleanup Skip", slug: "source-cleanup-skip" },
+  paths: { backend: "backend", frontend: "frontend", frontendDockerfile: "frontend/Dockerfile" },
+  deploy: {
+    buildMode: "compose",
+    source: {
+      sourceType: "github",
+      repository: "https://github.com/acme/source-cleanup-skip.git",
+      branch: "main",
+      githubId: "github-1"
+    },
+    provider: { type: "dokploy" }
+  },
+  verify: { endpoints: [] },
+};\n`);
+  writeFileSync(path.join(cwd, "backend", "api", "status.ts"), `export const ok = true;\n`);
+  writeFileSync(path.join(cwd, "backend", "Dockerfile"), "FROM scratch\n");
+  writeFileSync(path.join(cwd, "frontend", "Dockerfile"), "FROM scratch\n");
+  writeFileSync(path.join(fakeBin, "encore"), `#!/usr/bin/env node
+const args = process.argv.slice(2);
+if (args[0] === "version") {
+  console.log("encore v1.0.0");
+  process.exit(0);
+}
+if (args[0] === "debug") {
+  console.log(JSON.stringify({ svcs: [], sql_databases: [], cache_clusters: [], pubsub_topics: [], buckets: [], pkgs: [], cron_jobs: [] }));
+  process.exit(0);
+}
+process.exit(0);
+`);
+  chmodSync(path.join(fakeBin, "encore"), 0o755);
+  writeFileSync(path.join(cwd, ".nstack", "state.json"), `${JSON.stringify({
+    dokploy: {
+      projectId: "project-1",
+      environmentId: "environment-1",
+      composeId: "compose-1",
+      postgresId: "postgres-1",
+    },
+    infra: {
+      postgres: {
+        appName: "source-cleanup-skip-postgres",
+        host: "source-cleanup-skip-postgres:5432",
+        database: "app",
+        user: "nstack",
+        password: "postgres-secret",
+      },
+    },
+  }, null, 2)}\n`);
+
+  const envKeys = ["NSTACK_DOMAIN", "DOKPLOY_URL", "DOKPLOY_API_KEY", "PATH"];
+  const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+  process.env.NSTACK_DOMAIN = "source-cleanup-skip.example.test";
+  process.env.DOKPLOY_URL = "https://dokploy.example.test";
+  process.env.DOKPLOY_API_KEY = "dummy";
+  process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH || ""}`;
+
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    const parsed = new URL(String(url));
+    const endpoint = parsed.pathname.replace(/^\/api\/(?:trpc\/)?/, "");
+    calls.push(endpoint);
+    if ((init.method || "GET") === "GET") {
+      if (endpoint === "project.all") return Response.json({ json: [{ projectId: "project-1", name: "Source Cleanup Skip" }] });
+      if (endpoint === "environment.byProjectId") return Response.json({ json: [{ environmentId: "environment-1", name: "production" }] });
+      if (endpoint === "compose.one") return Response.json({ json: { composeId: "compose-1", name: "source-cleanup-skip-app" } });
+      if (endpoint === "gitProvider.getAll" || endpoint.endsWith(".search") || endpoint === "domain.byComposeId") return Response.json({ json: [] });
+      if (endpoint === "settings.getIp") return Response.json({ json: "203.0.113.10" });
+    }
+    if (endpoint === "domain.validateDomain") return Response.json({ json: { isValid: true, resolvedIp: "203.0.113.10" } });
+    return Response.json({ json: {} });
+  };
+
+  try {
+    await assert.rejects(
+      deploy({
+        cwd,
+        skipBuild: true,
+        skipVerify: true,
+        skipStatus: true,
+        noWait: true,
+        yes: true,
+      }),
+      /Dokploy github provider id github-1 is not configured/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const key of envKeys) {
+      if (originalEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = originalEnv[key];
+    }
+  }
+
+  assert.equal(calls.includes("postgres.remove"), false);
+});
+
 test("deploy refuses existing Dokploy database when local infra password is missing", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "nstack-existing-db-"));
   mkdirSync(path.join(cwd, "backend", "api"), { recursive: true });

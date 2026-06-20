@@ -73,3 +73,41 @@ test("syncSchedules creates, updates, and prunes Dokploy compose schedules", asy
     .sort();
   assert.deepEqual(deletes, ["stale-listed", "stale-state"]);
 });
+
+test("syncSchedules can preserve declined stale schedules", async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    const parsed = new URL(String(url));
+    const body = init.body ? JSON.parse(init.body) : null;
+    calls.push({ method: init.method, path: parsed.pathname, body });
+
+    if (init.method === "GET" && parsed.pathname === "/api/schedule.list") {
+      return Response.json({
+        json: [
+          { scheduleId: "stale-listed", name: "nstack-cron-app-stale" },
+        ],
+      });
+    }
+    return Response.json({ json: {} });
+  };
+
+  try {
+    const provider = new DokployProvider({
+      config: {
+        app: { slug: "cron-app" },
+        deploy: { provider: { url: "https://dokploy.example.test", apiKey: "dummy" } },
+      },
+      state: { dokploy: { schedules: { old: "stale-state" } } },
+    });
+    const result = await provider.syncSchedules("compose-1", [], {
+      shouldPrune: ({ name }) => name !== "stale",
+    });
+    assert.deepEqual(result, { stale: "stale-listed" });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(calls.some((call) => call.path === "/api/schedule.delete" && call.body.scheduleId === "stale-listed"), false);
+  assert.equal(calls.some((call) => call.path === "/api/schedule.delete" && call.body.scheduleId === "stale-state"), true);
+});

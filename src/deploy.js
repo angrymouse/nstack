@@ -179,6 +179,7 @@ export async function deploy(options = {}) {
   }
 
   const provider = new DokployProvider({ config, state: nextState });
+  const resourceCleanup = createResourceCleanupDecider({ cwd, config, options });
   const previousProjectId = nextState.dokploy.projectId || "";
   const projectId = await progress.step("Ensuring Dokploy project", () => provider.ensureProject());
   if (previousProjectId && previousProjectId !== projectId) clearDokployEnvironmentState(nextState.dokploy);
@@ -193,7 +194,7 @@ export async function deploy(options = {}) {
 
   if (resources.source === "encore-metadata") {
     await progress.step("Pruning removed Dokploy resources", async () => {
-      await pruneRemovedDokployResources({ provider, environmentId, resources, state: nextState, infra });
+      await pruneRemovedDokployResources({ provider, environmentId, resources, state: nextState, infra, config, resourceCleanup });
       persistState();
     });
   }
@@ -215,7 +216,7 @@ export async function deploy(options = {}) {
   }
 
   if (resources.databases.length > 0) {
-    await progress.step("Creating Postgres instances", async () => {
+    await progress.step("Ensuring Postgres instances", async () => {
       const existingPostgresId = await provider.resolvePostgresId(environmentId);
       if (existingPostgresId && generatedInfraSecrets.postgres) {
         throw existingInfraSecretError("Postgres", `${config.app.slug}-postgres`, "NSTACK_POSTGRES_PASSWORD");
@@ -233,7 +234,7 @@ export async function deploy(options = {}) {
     });
   }
   if (resources.caches.length > 0) {
-    await progress.step("Creating Redis instances", async () => {
+    await progress.step("Ensuring Redis instances", async () => {
       const existingRedisId = await provider.resolveRedisId(environmentId);
       if (existingRedisId && generatedInfraSecrets.redis) {
         throw existingInfraSecretError("Redis", `${config.app.slug}-redis`, "NSTACK_REDIS_PASSWORD");
@@ -278,7 +279,8 @@ export async function deploy(options = {}) {
   persistFullState();
 
   nextState.dokploy.schedules = await progress.step("Syncing Dokploy schedules", () => provider.syncSchedules(composeId, resources.crons, {
-      prune: resources.source === "encore-metadata",
+      prune: resources.source === "encore-metadata" && !resourceCleanup.skipAll,
+      shouldPrune: (resource) => resourceCleanup.shouldRemove(resource),
     }));
   persistFullState();
 
@@ -361,18 +363,25 @@ function clearDokployResourceState(dokploy) {
   delete dokploy.schedules;
 }
 
-async function pruneRemovedDokployResources({ provider, environmentId, resources, state, infra }) {
+async function pruneRemovedDokployResources({ provider, environmentId, resources, state, infra, config, resourceCleanup }) {
+  if (resourceCleanup.skipAll) return;
   if (resources.databases.length === 0) {
     const postgresId = await provider.resolvePostgresId(environmentId);
-    if (postgresId) await provider.removePostgres(postgresId);
-    delete state.dokploy.postgresId;
-    deleteInfraSection(state, infra, "postgres");
+    const resource = { type: "db", name: `${config.app.slug}-postgres`, id: postgresId };
+    if (postgresId && await resourceCleanup.shouldRemove(resource)) {
+      await provider.removePostgres(postgresId);
+      delete state.dokploy.postgresId;
+      deleteInfraSection(state, infra, "postgres");
+    }
   }
   if (resources.caches.length === 0) {
     const redisId = await provider.resolveRedisId(environmentId);
-    if (redisId) await provider.removeRedis(redisId);
-    delete state.dokploy.redisId;
-    deleteInfraSection(state, infra, "redis");
+    const resource = { type: "cache", name: `${config.app.slug}-redis`, id: redisId };
+    if (redisId && await resourceCleanup.shouldRemove(resource)) {
+      await provider.removeRedis(redisId);
+      delete state.dokploy.redisId;
+      deleteInfraSection(state, infra, "redis");
+    }
   }
   if (resources.buckets.length === 0) {
     deleteInfraSection(state, infra, "objectStorage");
@@ -384,6 +393,82 @@ function deleteInfraSection(state, infra, key) {
   if (!state.infra) return;
   delete state.infra[key];
   if (Object.keys(state.infra).length === 0) delete state.infra;
+}
+
+function createResourceCleanupDecider({ cwd, config, options }) {
+  const skipAll = isSourceBackedCompose(config);
+  const prompter = new Prompter({ yes: false });
+  return {
+    skipAll,
+    async shouldRemove(resource) {
+      const normalized = cleanupResourceEntry(resource);
+      if (!normalized || skipAll || isCleanupIgnored(config, normalized)) return false;
+      if (options.yes) return true;
+
+      const envName = cleanupConfirmEnvName(normalized);
+      const hasEnvAnswer = process.env[envName] !== undefined;
+      if (!hasEnvAnswer && (options.json || process.stdin.isTTY !== true)) return false;
+
+      const accepted = await prompter.confirm(
+        envName,
+        `Do you want to remove ${normalized.type} resource ${normalized.name}?`,
+        { defaultValue: false },
+      );
+      if (!accepted) recordResourceCleanupIgnore(cwd, config, normalized);
+      return accepted;
+    },
+  };
+}
+
+function cleanupResourceEntry(resource) {
+  const type = String(resource?.type || "").trim();
+  const name = String(resource?.name || resource?.id || "").trim();
+  if (!type || !name) return null;
+  return { type: type.toLowerCase(), name };
+}
+
+function isCleanupIgnored(config, resource) {
+  return cleanupIgnoreEntries(config).some((entry) => entry.type === resource.type && entry.name === resource.name);
+}
+
+function cleanupIgnoreEntries(config) {
+  return (config.deploy?.resourceCleanup?.ignore || [])
+    .map(cleanupResourceEntry)
+    .filter(Boolean);
+}
+
+function recordResourceCleanupIgnore(cwd, config, resource) {
+  const ignore = cleanupIgnoreEntries(config);
+  if (!ignore.some((entry) => entry.type === resource.type && entry.name === resource.name)) {
+    ignore.push(resource);
+  }
+  config.deploy.resourceCleanup = {
+    ...(config.deploy.resourceCleanup || {}),
+    ignore,
+  };
+  writeResourceCleanupIgnoreExport(cwd, ignore);
+}
+
+function writeResourceCleanupIgnoreExport(cwd, ignore) {
+  const file = path.join(cwd, "nstack.config.mjs");
+  const nextExport = `export const nstackResourceCleanupIgnore = ${JSON.stringify(ignore, null, 2)};\n`;
+  const current = readText(file, "");
+  const pattern = /(?:^|\n)export\s+const\s+nstackResourceCleanupIgnore\s*=\s*[\s\S]*?;\s*(?=\n|$)/m;
+  const next = pattern.test(current)
+    ? current.replace(pattern, `\n${nextExport}`.replace(/\n$/, ""))
+    : `${current.replace(/\s*$/, "")}\n\n${nextExport}`;
+  writeText(file, next.endsWith("\n") ? next : `${next}\n`);
+}
+
+function cleanupConfirmEnvName(resource) {
+  return `NSTACK_REMOVE_${envNamePart(resource.type)}_RESOURCE_${envNamePart(resource.name)}`;
+}
+
+function envNamePart(value) {
+  return String(value || "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "") || "UNKNOWN";
 }
 
 export async function waitForDeployment(options = {}) {
@@ -1760,7 +1845,7 @@ function ensureInfraSecrets({ config, resources, state }) {
   const existing = state.infra || {};
   const postgresName = `${config.app.slug}-postgres`;
   const redisName = `${config.app.slug}-redis`;
-  const infra = {};
+  const infra = { ...existing };
   if (resources.databases.length > 0) {
     infra.postgres = {
       appName: postgresName,
