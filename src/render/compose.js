@@ -258,7 +258,7 @@ function postgresDatabaseInitService(ctx) {
   return {
     [POSTGRES_INIT_SERVICE]: {
       image: POSTGRES_INIT_IMAGE,
-      restart: "on-failure:5",
+      restart: "no",
       environment: {
         PGPASSWORD: composeRequiredEnv("NSTACK_POSTGRES_PASSWORD"),
       },
@@ -328,6 +328,7 @@ function postgresMigrationUrl(infra, resources, database) {
 function postgresDatabaseInitScript(infra, resources) {
   const { host, port } = postgresConnectionParts(infra.postgres.host);
   const user = infra.postgres.user || "postgres";
+  const maintenanceDatabase = infra.postgres.database || "postgres";
   const databaseNames = unique(resources.databases
     .map((database) => postgresPhysicalDatabaseName(infra, resources, database))
     .filter(Boolean));
@@ -337,12 +338,16 @@ function postgresDatabaseInitScript(infra, resources) {
     `POSTGRES_HOST=${shellQuote(host)}`,
     `POSTGRES_PORT=${shellQuote(port)}`,
     `POSTGRES_USER=${shellQuote(user)}`,
-    "until pg_isready -h \"$POSTGRES_HOST\" -p \"$POSTGRES_PORT\" -U \"$POSTGRES_USER\" -d postgres >/dev/null 2>&1; do sleep 1; done",
-    `for db in ${databaseNames.map(shellQuote).join(" ")}; do`,
-    "  if [ \"$(psql -v ON_ERROR_STOP=1 -h \"$POSTGRES_HOST\" -p \"$POSTGRES_PORT\" -U \"$POSTGRES_USER\" -d postgres -v db=\"$db\" -tAc \"SELECT 1 FROM pg_database WHERE datname = :'db'\")\" != \"1\" ]; then",
-    "    createdb -h \"$POSTGRES_HOST\" -p \"$POSTGRES_PORT\" -U \"$POSTGRES_USER\" --owner \"$POSTGRES_USER\" \"$db\"",
-    "  fi",
-    "done",
+    `POSTGRES_MAINTENANCE_DB=${shellQuote(maintenanceDatabase)}`,
+    "echo \"waiting for postgres at $POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_MAINTENANCE_DB\"",
+    "until pg_isready -h \"$POSTGRES_HOST\" -p \"$POSTGRES_PORT\" -U \"$POSTGRES_USER\" -d \"$POSTGRES_MAINTENANCE_DB\" >/dev/null 2>&1; do sleep 1; done",
+    ...databaseNames.flatMap((name) => [
+      `echo "ensuring postgres database ${shellEscapeDoubleQuoted(name)}"`,
+      `if [ "$(psql -v ON_ERROR_STOP=1 -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_MAINTENANCE_DB" -tAc ${shellDoubleQuote(`SELECT 1 FROM pg_database WHERE datname = ${sqlQuote(name)}`)})" != "1" ]; then`,
+      `  createdb -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" --maintenance-db="$POSTGRES_MAINTENANCE_DB" --owner "$POSTGRES_USER" ${shellQuote(name)}`,
+      "fi",
+    ]),
+    "echo \"postgres database init complete\"",
   ].join("\n");
 }
 
@@ -364,6 +369,18 @@ function unique(values) {
 
 function shellQuote(value) {
   return `'${String(value).replaceAll("'", "'\"'\"'")}'`;
+}
+
+function shellEscapeDoubleQuoted(value) {
+  return String(value).replaceAll("\\", "\\\\").replaceAll("\"", "\\\"").replaceAll("$", "\\$").replaceAll("`", "\\`");
+}
+
+function shellDoubleQuote(value) {
+  return `"${shellEscapeDoubleQuoted(value)}"`;
+}
+
+function sqlQuote(value) {
+  return `'${String(value).replaceAll("'", "''")}'`;
 }
 
 function objectStorageAliases(config, buckets, objectStorageHost) {
