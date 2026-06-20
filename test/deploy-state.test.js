@@ -1075,6 +1075,8 @@ process.exit(0);
   }
 
   assert.equal(calls.includes("postgres.remove"), false);
+  assert.equal(calls.includes("postgres.one"), false);
+  assert.doesNotMatch(readFileSync(path.join(cwd, "nstack.config.mjs"), "utf8"), /nstackResourceCleanupIgnore/);
 });
 
 test("deploy refuses existing Dokploy database when local infra password is missing", async () => {

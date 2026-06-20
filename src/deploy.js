@@ -192,6 +192,8 @@ export async function deploy(options = {}) {
   nextState.dokploy.environmentId = environmentId;
   persistState();
 
+  // Declined cleanup can update nstack.config.mjs, so this must stay before
+  // source-backed dirty checks and commit/push handling below.
   if (resources.source === "encore-metadata") {
     await progress.step("Pruning removed Dokploy resources", async () => {
       await pruneRemovedDokployResources({ provider, environmentId, resources, state: nextState, infra, config, resourceCleanup });
