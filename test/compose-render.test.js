@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { renderDokployCompose } from "../src/render/compose.js";
+import { POSTGRES_INIT_IMAGE, POSTGRES_INIT_SERVICE, renderDokployCompose } from "../src/render/compose.js";
 
 test("compose renderer quotes dynamic values and omits cron runner containers", () => {
   const output = renderDokployCompose({
@@ -148,11 +148,63 @@ test("compose renderer runs Encore database migrations with the pinned go-migrat
   });
 
   assert.match(output, /migrate-app:\n\s+image: "migrate\/migrate:v4\.15\.2"/);
+  assert.match(output, new RegExp(`${POSTGRES_INIT_SERVICE}:\\n\\s+image: "${POSTGRES_INIT_IMAGE.replaceAll(".", "\\.")}"`));
+  assert.match(output, /PGPASSWORD: "\$\{NSTACK_POSTGRES_PASSWORD:\?set NSTACK_POSTGRES_PASSWORD\}"/);
+  assert.match(output, /command:\n\s+- "set -eu\\nPOSTGRES_HOST='migrated-app-postgres-a1b2c3'/);
+  assert.match(output, /for db in 'app'; do/);
   assert.match(output, /- "-path=\/migrations"/);
   assert.match(output, /- "-database=postgres:\/\/nstack:\$\{NSTACK_POSTGRES_PASSWORD:\?set NSTACK_POSTGRES_PASSWORD\}@migrated-app-postgres-a1b2c3:5432\/app\?sslmode=disable"/);
   assert.match(output, /- "up"/);
   assert.match(output, /- "\.\.\/\.\.\/backend\/api\/migrations:\/migrations:ro"/);
+  assert.match(output, /migrate-app:[\s\S]*depends_on:[\s\S]*postgres-init:[\s\S]*condition: "service_completed_successfully"/);
   assert.match(output, /migrate-app:[\s\S]*networks:[\s\S]*dokploy-network: \{\}/);
   assert.match(output, /networks:\n\s+dokploy-network:\n\s+external: true/);
   assert.match(output, /backend:[\s\S]*depends_on:[\s\S]*migrate-app:[\s\S]*condition: "service_completed_successfully"/);
+});
+
+test("compose renderer creates every Encore Postgres database before migrations", () => {
+  const output = renderDokployCompose({
+    config: {
+      app: { slug: "indexes-club", domain: "indexes.club" },
+      deploy: { target: "prod" },
+      paths: { backend: "backend" },
+    },
+    resources: {
+      databases: [
+        { name: "indexer", migrations: "indexer/migrations" },
+        { name: "oracle", migrations: "oracle/migrations" },
+      ],
+      caches: [],
+      topics: [],
+      buckets: [],
+      secrets: [],
+      crons: [],
+    },
+    infra: {
+      postgres: {
+        host: "indexes-club-postgres-onztf5:5432",
+        database: "indexes_club",
+        user: "nstack",
+      },
+    },
+    images: {
+      backend: "indexes-club-backend:${NSTACK_IMAGE_TAG:-local}",
+      frontend: "indexes-club-frontend:${NSTACK_IMAGE_TAG:-local}",
+    },
+    release: { commit: "abc123", tag: "tag" },
+  });
+
+  assert.match(output, /postgres-init:/);
+  assert.match(output, /POSTGRES_HOST='indexes-club-postgres-onztf5'/);
+  assert.match(output, /POSTGRES_PORT='5432'/);
+  assert.match(output, /POSTGRES_USER='nstack'/);
+  assert.match(output, /for db in 'indexer' 'oracle'; do/);
+  assert.match(output, /SELECT 1 FROM pg_database WHERE datname = :'db'/);
+  assert.match(output, /createdb -h/);
+  assert.match(output, /--owner/);
+  assert.match(output, /- "-database=postgres:\/\/nstack:\$\{NSTACK_POSTGRES_PASSWORD:\?set NSTACK_POSTGRES_PASSWORD\}@indexes-club-postgres-onztf5:5432\/indexer\?sslmode=disable"/);
+  assert.match(output, /- "-database=postgres:\/\/nstack:\$\{NSTACK_POSTGRES_PASSWORD:\?set NSTACK_POSTGRES_PASSWORD\}@indexes-club-postgres-onztf5:5432\/oracle\?sslmode=disable"/);
+  assert.match(output, /migrate-indexer:[\s\S]*depends_on:[\s\S]*postgres-init:[\s\S]*condition: "service_completed_successfully"/);
+  assert.match(output, /migrate-oracle:[\s\S]*depends_on:[\s\S]*postgres-init:[\s\S]*condition: "service_completed_successfully"/);
+  assert.match(output, /backend:[\s\S]*depends_on:[\s\S]*migrate-indexer:[\s\S]*condition: "service_completed_successfully"[\s\S]*migrate-oracle:[\s\S]*condition: "service_completed_successfully"/);
 });

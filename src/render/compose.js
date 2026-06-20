@@ -14,6 +14,8 @@ import {
 import { stringifyYaml } from "./yaml.js";
 
 export const ENCORE_MIGRATE_IMAGE = "migrate/migrate:v4.15.2";
+export const POSTGRES_INIT_IMAGE = "postgres:17-alpine";
+export const POSTGRES_INIT_SERVICE = "postgres-init";
 
 export function renderDokployCompose(ctx) {
   const { config, images = {}, release, build = null } = ctx;
@@ -23,6 +25,7 @@ export function renderDokployCompose(ctx) {
   const objectStorageHost = objectStorageServiceHost(config);
   const nsqdHost = `${config.app.slug}-nsqd`;
   const nsqlookupdHost = `${config.app.slug}-nsqlookupd`;
+  const postgresInitService = postgresDatabaseInitService(renderCtx);
   const migrationServices = databaseMigrationServices(renderCtx);
   const doc = {
     name: config.app.slug,
@@ -61,12 +64,13 @@ export function renderDokployCompose(ctx) {
           },
         },
         healthcheck: nodeHttpHealthcheck("http://127.0.0.1:8080/__encore/healthz"),
-        depends_on: backendDependsOn(resources, migrationServices),
+        depends_on: backendDependsOn(resources, migrationServices, postgresInitService),
       },
     },
   };
+  Object.assign(doc.services, postgresInitService);
   Object.assign(doc.services, migrationServices);
-  if (Object.keys(migrationServices).length > 0) {
+  if (Object.keys(migrationServices).length > 0 || Object.keys(postgresInitService).length > 0) {
     doc.networks = { ...(doc.networks || {}), "dokploy-network": { external: true } };
   }
 
@@ -234,13 +238,37 @@ function nodeTcpHealthcheck(port) {
   };
 }
 
-function backendDependsOn(resources, migrationServices = {}) {
+function backendDependsOn(resources, migrationServices = {}, postgresInitService = {}) {
   const deps = {};
   for (const serviceName of Object.keys(migrationServices)) {
     deps[serviceName] = { condition: "service_completed_successfully" };
   }
+  for (const serviceName of Object.keys(postgresInitService)) {
+    if (Object.keys(migrationServices).length === 0) deps[serviceName] = { condition: "service_completed_successfully" };
+  }
   if (resources.topics.length > 0) deps.nsqd = { condition: "service_started" };
   return Object.keys(deps).length ? deps : undefined;
+}
+
+function postgresDatabaseInitService(ctx) {
+  const { infra, resources } = ctx;
+  if (!resources.databases.length || !infra?.postgres?.host) return {};
+  const script = postgresDatabaseInitScript(infra, resources);
+  if (!script) return {};
+  return {
+    [POSTGRES_INIT_SERVICE]: {
+      image: POSTGRES_INIT_IMAGE,
+      restart: "on-failure:5",
+      environment: {
+        PGPASSWORD: composeRequiredEnv("NSTACK_POSTGRES_PASSWORD"),
+      },
+      entrypoint: ["/bin/sh", "-c"],
+      command: [script],
+      networks: {
+        "dokploy-network": {},
+      },
+    },
+  };
 }
 
 function databaseMigrationServices(ctx) {
@@ -261,6 +289,9 @@ function databaseMigrationServices(ctx) {
         volumes: [
           `${migrationHostPath(config, database)}:/migrations:ro`,
         ],
+        depends_on: {
+          [POSTGRES_INIT_SERVICE]: { condition: "service_completed_successfully" },
+        },
         networks: {
           "dokploy-network": {},
         },
@@ -290,8 +321,49 @@ function normalizeRelativePath(value) {
 }
 
 function postgresMigrationUrl(infra, resources, database) {
-  const databaseName = resources.databases.length === 1 ? infra.postgres.database : database.name;
+  const databaseName = postgresPhysicalDatabaseName(infra, resources, database);
   return `postgres://${infra.postgres.user}:\${NSTACK_POSTGRES_PASSWORD:?set NSTACK_POSTGRES_PASSWORD}@${infra.postgres.host}/${databaseName}?sslmode=disable`;
+}
+
+function postgresDatabaseInitScript(infra, resources) {
+  const { host, port } = postgresConnectionParts(infra.postgres.host);
+  const user = infra.postgres.user || "postgres";
+  const databaseNames = unique(resources.databases
+    .map((database) => postgresPhysicalDatabaseName(infra, resources, database))
+    .filter(Boolean));
+  if (databaseNames.length === 0) return "";
+  return [
+    "set -eu",
+    `POSTGRES_HOST=${shellQuote(host)}`,
+    `POSTGRES_PORT=${shellQuote(port)}`,
+    `POSTGRES_USER=${shellQuote(user)}`,
+    "until pg_isready -h \"$POSTGRES_HOST\" -p \"$POSTGRES_PORT\" -U \"$POSTGRES_USER\" -d postgres >/dev/null 2>&1; do sleep 1; done",
+    `for db in ${databaseNames.map(shellQuote).join(" ")}; do`,
+    "  if [ \"$(psql -v ON_ERROR_STOP=1 -h \"$POSTGRES_HOST\" -p \"$POSTGRES_PORT\" -U \"$POSTGRES_USER\" -d postgres -v db=\"$db\" -tAc \"SELECT 1 FROM pg_database WHERE datname = :'db'\")\" != \"1\" ]; then",
+    "    createdb -h \"$POSTGRES_HOST\" -p \"$POSTGRES_PORT\" -U \"$POSTGRES_USER\" --owner \"$POSTGRES_USER\" \"$db\"",
+    "  fi",
+    "done",
+  ].join("\n");
+}
+
+function postgresPhysicalDatabaseName(infra, resources, database) {
+  if (resources.databases.length === 1) return infra.postgres.database || database.name;
+  return database.name;
+}
+
+function postgresConnectionParts(hostWithPort) {
+  const text = String(hostWithPort || "");
+  const match = text.match(/^(.+):([0-9]+)$/);
+  if (!match) return { host: text, port: "5432" };
+  return { host: match[1], port: match[2] };
+}
+
+function unique(values) {
+  return [...new Set(values)];
+}
+
+function shellQuote(value) {
+  return `'${String(value).replaceAll("'", "'\"'\"'")}'`;
 }
 
 function objectStorageAliases(config, buckets, objectStorageHost) {
