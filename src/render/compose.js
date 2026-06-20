@@ -339,12 +339,12 @@ function postgresDatabaseInitScript(infra, resources) {
     `POSTGRES_PORT=${shellQuote(port)}`,
     `POSTGRES_USER=${shellQuote(user)}`,
     `POSTGRES_MAINTENANCE_DB=${shellQuote(maintenanceDatabase)}`,
-    "echo \"waiting for postgres at $POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_MAINTENANCE_DB\"",
-    "until pg_isready -h \"$POSTGRES_HOST\" -p \"$POSTGRES_PORT\" -U \"$POSTGRES_USER\" -d \"$POSTGRES_MAINTENANCE_DB\" >/dev/null 2>&1; do sleep 1; done",
+    `echo "waiting for postgres at ${composeShellVar("POSTGRES_HOST")}:${composeShellVar("POSTGRES_PORT")}/${composeShellVar("POSTGRES_MAINTENANCE_DB")}"`,
+    `until pg_isready -h "${composeShellVar("POSTGRES_HOST")}" -p "${composeShellVar("POSTGRES_PORT")}" -U "${composeShellVar("POSTGRES_USER")}" -d "${composeShellVar("POSTGRES_MAINTENANCE_DB")}" >/dev/null 2>&1; do sleep 1; done`,
     ...databaseNames.flatMap((name) => [
       `echo "ensuring postgres database ${shellEscapeDoubleQuoted(name)}"`,
-      `if [ "$(psql -v ON_ERROR_STOP=1 -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_MAINTENANCE_DB" -tAc ${shellDoubleQuote(`SELECT 1 FROM pg_database WHERE datname = ${sqlQuote(name)}`)})" != "1" ]; then`,
-      `  createdb -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" --maintenance-db="$POSTGRES_MAINTENANCE_DB" --owner "$POSTGRES_USER" ${shellQuote(name)}`,
+      `if [ "$(psql -v ON_ERROR_STOP=1 -h "${composeShellVar("POSTGRES_HOST")}" -p "${composeShellVar("POSTGRES_PORT")}" -U "${composeShellVar("POSTGRES_USER")}" -d "${composeShellVar("POSTGRES_MAINTENANCE_DB")}" -tAc ${shellDoubleQuote(`SELECT 1 FROM pg_database WHERE datname = ${sqlQuote(name)}`)})" != "1" ]; then`,
+      `  createdb -h "${composeShellVar("POSTGRES_HOST")}" -p "${composeShellVar("POSTGRES_PORT")}" -U "${composeShellVar("POSTGRES_USER")}" --maintenance-db="${composeShellVar("POSTGRES_MAINTENANCE_DB")}" --owner "${composeShellVar("POSTGRES_USER")}" ${shellQuote(name)}`,
       "fi",
     ]),
     "echo \"postgres database init complete\"",
@@ -425,4 +425,8 @@ function composeRequiredEnv(name) {
 
 function composeRuntimeEnv(name) {
   return `$$` + `{${name}}`;
+}
+
+function composeShellVar(name) {
+  return `$$${name}`;
 }

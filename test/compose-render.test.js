@@ -153,9 +153,10 @@ test("compose renderer runs Encore database migrations with the pinned go-migrat
   assert.match(output, /PGPASSWORD: "\$\{NSTACK_POSTGRES_PASSWORD:\?set NSTACK_POSTGRES_PASSWORD\}"/);
   assert.match(output, /command:\n\s+- "set -eu\\nPOSTGRES_HOST='migrated-app-postgres-a1b2c3'/);
   assert.match(output, /POSTGRES_MAINTENANCE_DB='app'/);
+  assert.match(output, /\$\$POSTGRES_HOST/);
   assert.match(output, /ensuring postgres database app/);
   assert.match(output, /SELECT 1 FROM pg_database WHERE datname = 'app'/);
-  assert.match(output, /--maintenance-db=\\"\$POSTGRES_MAINTENANCE_DB\\"/);
+  assert.match(output, /--maintenance-db=\\"\$\$POSTGRES_MAINTENANCE_DB\\"/);
   assert.match(output, /- "-path=\/migrations"/);
   assert.match(output, /- "-database=postgres:\/\/nstack:\$\{NSTACK_POSTGRES_PASSWORD:\?set NSTACK_POSTGRES_PASSWORD\}@migrated-app-postgres-a1b2c3:5432\/app\?sslmode=disable"/);
   assert.match(output, /- "up"/);
@@ -203,12 +204,13 @@ test("compose renderer creates every Encore Postgres database before migrations"
   assert.match(output, /POSTGRES_PORT='5432'/);
   assert.match(output, /POSTGRES_USER='nstack'/);
   assert.match(output, /POSTGRES_MAINTENANCE_DB='indexes_club'/);
+  assert.match(output, /\$\$POSTGRES_HOST/);
   assert.match(output, /ensuring postgres database indexer/);
   assert.match(output, /ensuring postgres database oracle/);
   assert.match(output, /SELECT 1 FROM pg_database WHERE datname = 'indexer'/);
   assert.match(output, /SELECT 1 FROM pg_database WHERE datname = 'oracle'/);
   assert.match(output, /createdb -h/);
-  assert.match(output, /--maintenance-db=\\"\$POSTGRES_MAINTENANCE_DB\\"/);
+  assert.match(output, /--maintenance-db=\\"\$\$POSTGRES_MAINTENANCE_DB\\"/);
   assert.match(output, /--owner/);
   assert.match(output, /- "-database=postgres:\/\/nstack:\$\{NSTACK_POSTGRES_PASSWORD:\?set NSTACK_POSTGRES_PASSWORD\}@indexes-club-postgres-onztf5:5432\/indexer\?sslmode=disable"/);
   assert.match(output, /- "-database=postgres:\/\/nstack:\$\{NSTACK_POSTGRES_PASSWORD:\?set NSTACK_POSTGRES_PASSWORD\}@indexes-club-postgres-onztf5:5432\/oracle\?sslmode=disable"/);
