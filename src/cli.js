@@ -144,7 +144,7 @@ async function init(target, options) {
     APP_SLUG: slug,
   });
   const flagEnv = localDeployValues(options);
-  const wizardEnv = await initDeployWizard(cwd, options, flagEnv);
+  const wizardEnv = await initDeployWizard(cwd, options, flagEnv, { defaultRepoName: slug });
   const localEnv = { ...flagEnv, ...wizardEnv };
   if (Object.keys(localEnv).length > 0) {
     mergeEnvFile(path.join(cwd, localEnvPathForTarget(localEnv.NSTACK_TARGET || "prod")), localEnv);
@@ -284,7 +284,7 @@ function localDeployValues(options) {
   };
 }
 
-async function initDeployWizard(cwd, options, existingEnv) {
+async function initDeployWizard(cwd, options, existingEnv, { defaultRepoName = "" } = {}) {
   if (!shouldRunInitDeployWizard(options, existingEnv)) return {};
   const prompter = new Prompter({ yes: options.yes });
   try {
@@ -294,7 +294,7 @@ async function initDeployWizard(cwd, options, existingEnv) {
     const domain = await prompter.ask("NSTACK_DOMAIN", "App domain");
     const dokploy = await promptDokployInstance(prompter);
     const providers = await loadDokployGitProviders({ dokployUrl: dokploy.url, dokployApiKey: dokploy.apiKey });
-    const source = await promptGitSource({ cwd, prompter, providers });
+    const source = await promptGitSource({ cwd, prompter, providers, defaultRepoName });
     return {
       NSTACK_DOMAIN: domain,
       DOKPLOY_URL: dokploy.url,
@@ -322,16 +322,35 @@ async function loadDokployGitProviders({ dokployUrl, dokployApiKey }) {
   }
 }
 
-async function promptGitSource({ cwd, prompter, providers }) {
+async function promptGitSource({ cwd, prompter, providers, defaultRepoName = "" }) {
   const providerChoices = providers.map(gitProviderChoice).filter(Boolean);
   const manualChoice = { label: "Add Git configuration manually", value: "manual" };
-  const choice = await prompter.select("NSTACK_GIT_SOURCE", "Git hosting", [...providerChoices, manualChoice]);
-  if (choice.value === "manual") return promptManualGitSource({ cwd, prompter });
-  return promptProviderGitSource({ cwd, prompter, choice });
+  const choice = await prompter.select("NSTACK_GIT_SOURCE", "Git provider", [...providerChoices, manualChoice]);
+  if (choice.value === "manual") return promptManualGitSource({ cwd, prompter, defaultRepoName });
+  return promptProviderGitSource({ cwd, prompter, choice, defaultRepoName });
 }
 
-async function promptProviderGitSource({ cwd, prompter, choice }) {
-  const repository = await prompter.ask("NSTACK_REPOSITORY", "Repository URL", { defaultValue: inferGitRepository(cwd) });
+async function promptProviderGitSource({ cwd, prompter, choice, defaultRepoName = "" }) {
+  const explicitRepository = process.env.NSTACK_REPOSITORY || "";
+  if (explicitRepository) {
+    const branch = await prompter.ask("NSTACK_BRANCH", "Branch", { defaultValue: inferGitBranch(cwd) || "main" });
+    return sourceEnvValues({
+      sourceType: choice.sourceType,
+      providerId: choice.providerId,
+      repository: explicitRepository,
+      branch,
+    });
+  }
+
+  const inferred = parseGitRepository(inferGitRepository(cwd));
+  const owner = await promptRepositoryOwner({ prompter, choice, inferred });
+  const repositoryName = await promptRepositoryName({ prompter, inferred, defaultRepoName });
+  const repository = repositoryUrlForSource({
+    sourceType: choice.sourceType,
+    host: choice.host,
+    owner,
+    repository: repositoryName,
+  });
   const branch = await prompter.ask("NSTACK_BRANCH", "Branch", { defaultValue: inferGitBranch(cwd) || "main" });
   return sourceEnvValues({
     sourceType: choice.sourceType,
@@ -341,7 +360,7 @@ async function promptProviderGitSource({ cwd, prompter, choice }) {
   });
 }
 
-async function promptManualGitSource({ cwd, prompter }) {
+async function promptManualGitSource({ cwd, prompter, defaultRepoName = "" }) {
   const type = await prompter.select("NSTACK_SOURCE_TYPE", "Git hosting type", [
     { label: "GitHub", value: "github" },
     { label: "GitLab", value: "gitlab" },
@@ -349,6 +368,22 @@ async function promptManualGitSource({ cwd, prompter }) {
     { label: "Gitea / Forgejo", value: "gitea" },
     { label: "Plain Git / custom host", value: "git" },
   ]);
+  const explicitRepository = process.env.NSTACK_REPOSITORY || "";
+  if (type.value !== "git" && !explicitRepository) {
+    const inferred = parseGitRepository(inferGitRepository(cwd));
+    const host = await promptGitHost({ prompter, sourceType: type.value, inferred });
+    const owner = await promptRepositoryOwner({ prompter, choice: { sourceType: type.value, host, provider: null }, inferred });
+    const repositoryName = await promptRepositoryName({ prompter, inferred, defaultRepoName });
+    const repository = repositoryUrlForSource({ sourceType: type.value, host, owner, repository: repositoryName });
+    const branch = await prompter.ask("NSTACK_BRANCH", "Branch", { defaultValue: inferGitBranch(cwd) || "main" });
+    const providerId = await prompter.askOptional(providerIdEnvKey(type.value), "Dokploy provider id (optional)");
+    return sourceEnvValues({
+      sourceType: type.value,
+      providerId,
+      repository,
+      branch,
+    });
+  }
   const repository = await prompter.ask("NSTACK_REPOSITORY", "Repository URL", { defaultValue: inferGitRepository(cwd) });
   const branch = await prompter.ask("NSTACK_BRANCH", "Branch", { defaultValue: inferGitBranch(cwd) || "main" });
   const providerId = type.value === "git"
@@ -377,7 +412,76 @@ function gitProviderChoice(provider) {
     value: `${sourceType}:${providerId}`,
     sourceType,
     providerId,
+    host,
+    provider,
   };
+}
+
+async function promptRepositoryOwner({ prompter, choice, inferred = null }) {
+  const envOwner = process.env.NSTACK_GIT_OWNER || process.env.NSTACK_REPOSITORY_OWNER || "";
+  if (envOwner) return normalizeRepositoryOwner(envOwner);
+
+  const choices = repositoryOwnerChoices(choice, inferred);
+  if (choices.length > 0 && !prompter.yes) {
+    const manual = { label: "Enter manually", value: "__manual_owner__" };
+    const selected = await prompter.select("NSTACK_GIT_OWNER", "Git user/org", [...choices, manual]);
+    if (selected.value !== manual.value) return selected.value;
+  }
+
+  const defaultValue = choices[0]?.value || inferred?.owner || "";
+  const owner = await prompter.ask("NSTACK_GIT_OWNER", "Git user/org", { defaultValue });
+  return normalizeRepositoryOwner(owner);
+}
+
+async function promptRepositoryName({ prompter, inferred = null, defaultRepoName = "" }) {
+  const envName = process.env.NSTACK_REPOSITORY_NAME || process.env.NSTACK_GIT_REPOSITORY || "";
+  if (envName) return normalizeRepositoryName(envName);
+  const repository = await prompter.ask("NSTACK_REPOSITORY_NAME", "Repository name", {
+    defaultValue: inferred?.repository || normalizeRepositoryName(defaultRepoName),
+  });
+  return normalizeRepositoryName(repository);
+}
+
+async function promptGitHost({ prompter, sourceType, inferred = null }) {
+  const envHost = process.env.NSTACK_GIT_HOST || "";
+  if (envHost) return cleanHost(envHost).toLowerCase();
+  const defaultHost = inferred?.host || defaultGitHost(sourceType);
+  if (sourceType === "github" || sourceType === "bitbucket") return defaultHost;
+  const host = await prompter.ask("NSTACK_GIT_HOST", "Git host", { defaultValue: defaultHost });
+  return cleanHost(host).toLowerCase();
+}
+
+function repositoryOwnerChoices(choice, inferred = null) {
+  const owners = [
+    ...(inferred && inferred.host === choice.host ? [inferred.owner] : []),
+    ...providerOwnerCandidates(choice.provider, choice.sourceType),
+  ].map(normalizeRepositoryOwner).filter(Boolean);
+  return [...new Set(owners)].map((owner) => ({ label: owner, value: owner }));
+}
+
+function providerOwnerCandidates(provider, sourceType) {
+  const details = provider?.[sourceType] || {};
+  const keys = {
+    github: ["owner", "organization", "org", "login", "username", "githubOwner", "githubOrganization", "githubUsername"],
+    gitlab: ["owner", "namespace", "groupName", "group", "username", "gitlabOwner", "gitlabNamespace", "gitlabUsername"],
+    bitbucket: ["owner", "workspace", "workspaceName", "username", "bitbucketOwner", "bitbucketWorkspace", "bitbucketWorkspaceName", "bitbucketUsername"],
+    gitea: ["owner", "organization", "org", "username", "giteaOwner", "giteaOrganization", "giteaUsername"],
+  }[sourceType] || [];
+  return keys.map((key) => details[key]).filter((value) => typeof value === "string" && value.trim());
+}
+
+function repositoryUrlForSource({ sourceType, host = "", owner, repository }) {
+  const resolvedHost = host || defaultGitHost(sourceType);
+  if (!resolvedHost) throw new Error(`${sourceTypeLabel(sourceType)} host is required.`);
+  return `https://${resolvedHost}/${normalizeRepositoryOwner(owner)}/${normalizeRepositoryName(repository)}.git`;
+}
+
+function defaultGitHost(sourceType) {
+  return {
+    github: "github.com",
+    gitlab: "gitlab.com",
+    bitbucket: "bitbucket.org",
+  }[sourceType] || "";
 }
 
 function sourceEnvValues({ sourceType, providerId = "", repository, branch, sshKeyId = "" }) {
@@ -437,12 +541,53 @@ function cleanHost(value = "") {
   }
 }
 
+function normalizeRepositoryOwner(value = "") {
+  return String(value || "").trim().replace(/^\/+|\/+$/g, "");
+}
+
+function normalizeRepositoryName(value = "") {
+  return String(value || "")
+    .trim()
+    .replace(/^\/+|\/+$/g, "")
+    .replace(/\.git$/i, "");
+}
+
 function inferGitRepository(cwd) {
   try {
     return commandOutput("git", ["config", "--get", "remote.origin.url"], { cwd }).trim();
   } catch {
     return "";
   }
+}
+
+function parseGitRepository(repository = "") {
+  const value = String(repository || "").trim().replace(/#.*$/, "");
+  if (!value) return null;
+  const parsedUrl = parseGitUrl(value);
+  if (!parsedUrl) return null;
+  let pathName = parsedUrl.path.replace(/^\/+|\/+$/g, "");
+  if (pathName.endsWith(".git")) pathName = pathName.slice(0, -4);
+  const parts = pathName.split("/").filter(Boolean);
+  if (parts.length < 2) return null;
+  return {
+    host: cleanHost(parsedUrl.host).toLowerCase(),
+    owner: parts.slice(0, -1).join("/"),
+    repository: parts[parts.length - 1],
+  };
+}
+
+function parseGitUrl(value) {
+  if (/^https?:\/\//i.test(value) || /^ssh:\/\//i.test(value)) {
+    try {
+      const url = new URL(value);
+      return { host: url.host, path: url.pathname };
+    } catch {
+      return null;
+    }
+  }
+  const scpLike = value.match(/^(?:[^@]+@)?([^:/]+):(.+)$/);
+  if (scpLike) return { host: scpLike[1], path: scpLike[2] };
+  return null;
 }
 
 function inferGitBranch(cwd) {

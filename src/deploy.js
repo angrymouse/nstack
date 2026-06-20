@@ -301,7 +301,7 @@ export async function deploy(options = {}) {
       return report;
     }
 
-    checks = await progress.step("Verifying deployment", () => runReleaseChecks(cwd, config, release, options));
+    checks = await progress.step("Verifying deployment", () => runReleaseChecks(cwd, config, release, options), { allowOutput: true });
     timings.push(...checks.timings);
   } catch (error) {
     nextState.lastAttempt = releaseAttempt(release, {

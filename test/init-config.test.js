@@ -527,6 +527,101 @@ test("interactive init can select a configured Dokploy instance", async () => {
   assert.match(localEnv, /NSTACK_GIT_SSH_KEY_ID=ssh-key-1/);
 });
 
+test("interactive init builds repository URLs from provider owner and repo prompts", async () => {
+  const cases = [
+    {
+      sourceType: "github",
+      providerId: "github-1",
+      provider: { providerType: "github", github: { githubId: "github-1", isConfigured: true } },
+      configured: { githubId: "github-1" },
+      endpoint: "github.githubProviders",
+      owner: "acme",
+      repo: "github-app",
+      expected: "https://github.com/acme/github-app.git",
+    },
+    {
+      sourceType: "gitlab",
+      providerId: "gitlab-1",
+      provider: { providerType: "gitlab", gitlab: { gitlabId: "gitlab-1", gitlabUrl: "https://gitlab.example.test", isConfigured: true } },
+      configured: { gitlabId: "gitlab-1" },
+      endpoint: "gitlab.gitlabProviders",
+      owner: "platform/apps",
+      repo: "gitlab-app",
+      expected: "https://gitlab.example.test/platform/apps/gitlab-app.git",
+    },
+    {
+      sourceType: "gitea",
+      providerId: "gitea-1",
+      provider: { providerType: "gitea", gitea: { giteaId: "gitea-1", giteaUrl: "https://git.example.test", isConfigured: true } },
+      configured: { giteaId: "gitea-1" },
+      endpoint: "gitea.giteaProviders",
+      owner: "angrymouse",
+      repo: "forgejo-app",
+      expected: "https://git.example.test/angrymouse/forgejo-app.git",
+    },
+  ];
+
+  const envKeys = [
+    "NSTACK_INIT_DEPLOY",
+    "NSTACK_DOMAIN",
+    "NSTACK_GIT_SOURCE",
+    "NSTACK_GIT_OWNER",
+    "NSTACK_REPOSITORY_NAME",
+    "NSTACK_BRANCH",
+    "NSTACK_PACKAGE_MANAGER",
+    "DOKPLOY_URL",
+    "DOKPLOY_API_KEY",
+  ];
+  const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+  const originalIsTTY = process.stdin.isTTY;
+  const originalFetch = globalThis.fetch;
+
+  try {
+    process.stdin.isTTY = true;
+    process.env.NSTACK_INIT_DEPLOY = "true";
+    process.env.NSTACK_PACKAGE_MANAGER = "pnpm";
+    process.env.DOKPLOY_URL = "https://dokploy.example.test";
+    process.env.DOKPLOY_API_KEY = "secret-token";
+    process.env.NSTACK_BRANCH = "main";
+
+    for (const item of cases) {
+      const cwd = mkdtempSync(path.join(tmpdir(), `nstack-init-${item.sourceType}-`));
+      const target = path.join(cwd, "app");
+      process.env.NSTACK_DOMAIN = `${item.sourceType}.example.test`;
+      process.env.NSTACK_GIT_SOURCE = `${item.sourceType}:${item.providerId}`;
+      process.env.NSTACK_GIT_OWNER = item.owner;
+      process.env.NSTACK_REPOSITORY_NAME = item.repo;
+      globalThis.fetch = async (url) => {
+        const parsed = new URL(String(url));
+        const endpoint = parsed.pathname.replace("/api/trpc/", "");
+        if (endpoint === "gitProvider.getAll") return Response.json({ json: [item.provider] });
+        if (endpoint === item.endpoint) return Response.json({ json: [item.configured] });
+        assert.fail(`Unexpected Dokploy endpoint ${endpoint}`);
+      };
+
+      const report = await runCli(["init", target, "--skip-install"]);
+      assert.equal(report.deploy.source.type, item.sourceType);
+      assert.equal(report.deploy.source.repository, item.expected);
+      assert.equal(
+        execFileSync("git", ["-C", target, "remote", "get-url", "origin"], { encoding: "utf8" }).trim(),
+        item.expected,
+      );
+
+      const localEnv = readFileSync(path.join(target, ".nstack", "local.env"), "utf8");
+      assert.match(localEnv, new RegExp(`NSTACK_SOURCE_TYPE=${item.sourceType}`));
+      assert.match(localEnv, new RegExp(`NSTACK_${item.sourceType.toUpperCase()}_ID=${item.providerId}`));
+      assert.match(localEnv, new RegExp(`NSTACK_REPOSITORY=${item.expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    process.stdin.isTTY = originalIsTTY;
+    for (const key of envKeys) {
+      if (originalEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = originalEnv[key];
+    }
+  }
+});
+
 test("configure --json reports link metadata without API key values", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "nstack-config-json-"));
   const target = path.join(cwd, "app");
