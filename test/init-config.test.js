@@ -58,6 +58,7 @@ exit 1
     assert.equal(report.install.skipped, false);
     assert.deepEqual(report.install.commands, ["pnpm install --no-frozen-lockfile", "pnpm approve-builds --all"]);
     assert.deepEqual(report.next, [
+      `cd ${target}`,
       "nstack configure --domain <domain> --dokploy-url <url> --dokploy-api-key <key> --repository <git-url>",
       "nstack deploy",
     ]);
@@ -86,6 +87,7 @@ exit 1
   assert.equal(execFileSync("git", ["-C", target, "status", "--short"], { encoding: "utf8" }).trim(), "");
   assert.deepEqual(readFileSync(pnpmLog, "utf8").trim().split("\n"), ["install --no-frozen-lockfile", "approve-builds --all"]);
   assert.equal(execFileSync("git", ["-C", target, "ls-tree", "-r", "--name-only", "HEAD", "pnpm-lock.yaml"], { encoding: "utf8" }).trim(), "pnpm-lock.yaml");
+  assert.equal(execFileSync("git", ["-C", target, "ls-tree", "-r", "--name-only", "HEAD", "backend/.gitignore"], { encoding: "utf8" }).trim(), "backend/.gitignore");
   assert.match(readFileSync(path.join(target, "pnpm-workspace.yaml"), "utf8"), /onlyBuiltDependencies:/);
 
   const gitignore = readFileSync(path.join(target, ".gitignore"), "utf8");
@@ -217,14 +219,34 @@ test("cli flags do not mutate process env while writing local config", async () 
   assert.match(localEnv, /NSTACK_REGISTRY=ghcr\.io\/acme\/linked/);
 });
 
+test("init next steps enter the generated project directory", async () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "nstack-init-next-"));
+  const previousCwd = process.cwd();
+  process.chdir(cwd);
+  try {
+    const report = await runCli(["init", "web-app", "--yes", "--skip-install"]);
+    assert.deepEqual(report.next, [
+      "cd web-app",
+      "pnpm install",
+      "nstack configure --domain <domain> --dokploy-url <url> --dokploy-api-key <key> --repository <git-url>",
+      "nstack deploy",
+    ]);
+  } finally {
+    process.chdir(previousCwd);
+  }
+});
+
 test("configure persists provider-specific source settings non-interactively", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "nstack-configure-source-"));
   const target = path.join(cwd, "app");
 
   await runCli(["init", target, "--yes", "--skip-install"]);
+  const output = [];
+  const originalLog = console.log;
   const previousCwd = process.cwd();
   process.chdir(target);
   try {
+    console.log = (value = "") => output.push(String(value));
     await runCli([
       "configure",
       "--yes",
@@ -252,8 +274,12 @@ test("configure persists provider-specific source settings non-interactively", a
       "backend/**,frontend/**,deploy/nstack/**",
     ]);
   } finally {
+    console.log = originalLog;
     process.chdir(previousCwd);
   }
+
+  assert.ok(output.includes("Next:"));
+  assert.ok(output.includes("  nstack deploy"));
 
   const localEnv = readFileSync(path.join(target, ".nstack", "local.env"), "utf8");
   assert.match(localEnv, /NSTACK_DOMAIN=demo\.example\.test/);
@@ -340,6 +366,7 @@ test("init skips deploy wizard when stdin is not interactive", async () => {
 
   assert.equal(report.files.localEnv, null);
   assert.deepEqual(report.next, [
+    `cd ${target}`,
     "pnpm install",
     "nstack configure --domain <domain> --dokploy-url <url> --dokploy-api-key <key> --repository <git-url>",
     "nstack deploy",
@@ -401,7 +428,7 @@ test("init can write provider-specific source settings non-interactively", async
     "--watch-paths",
     "backend/**,frontend/**,deploy/nstack/**",
   ]);
-  assert.deepEqual(report.next, ["pnpm install", "nstack deploy"]);
+  assert.deepEqual(report.next, [`cd ${target}`, "pnpm install", "nstack deploy"]);
   assert.equal(report.deploy.source.type, "gitlab");
 
   const config = readFileSync(path.join(target, "nstack.config.mjs"), "utf8");

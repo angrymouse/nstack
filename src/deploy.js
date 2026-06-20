@@ -43,6 +43,8 @@ const maxReleaseHistory = 20;
 const defaultValidationPollMs = 100;
 const maxValidationPollMs = 250;
 const defaultEndpointRequestTimeoutMs = 2000;
+const encoreBackendGitignorePath = "backend/.gitignore";
+const encoreBackendGitignoreText = "encore.gen.go\nencore.gen.cue\n/.encore\n/encore.gen\n";
 
 export async function configure(options = {}) {
   const cwd = options.cwd || process.cwd();
@@ -59,6 +61,8 @@ export async function configure(options = {}) {
   if (config.deploy.buildMode === "registry") console.log(`  registry: ${config.deploy.registry}`);
   if (config.deploy.buildMode === "compose") console.log(`  source: ${config.deploy.source.repository || "(missing)"}`);
   console.log(`  provider: ${config.deploy.provider.type}`);
+  console.log("Next:");
+  console.log("  nstack deploy");
   return report;
 }
 
@@ -1559,7 +1563,7 @@ async function syncSourceDeployArtifacts(cwd, config, source = null, timings = [
   if (otherChanges.length > 0) {
     throw new Error([
       "Source-backed deploy found uncommitted app changes.",
-      "Commit or stash app changes first; nstack only auto-commits generated deploy/nstack artifacts.",
+      "Commit or stash app changes first; nstack only auto-commits generated deploy artifacts.",
       ...otherChanges.slice(0, 8).map((file) => `  - ${file}`),
       ...(otherChanges.length > 8 ? [`  - ${otherChanges.length - 8} more`] : []),
     ].join("\n"));
@@ -1567,8 +1571,8 @@ async function syncSourceDeployArtifacts(cwd, config, source = null, timings = [
 
   if (generatedChanges.length > 0) {
     await timedAsync("source: commit deploy artifacts", true, timings, async () => {
-      run("git", ["add", generatedDir], { cwd, capture: true });
-      const staged = safeOutput("git", ["diff", "--cached", "--name-only", "--", generatedDir], cwd).trim();
+      run("git", ["add", "--", ...generatedChanges], { cwd, capture: true });
+      const staged = safeOutput("git", ["diff", "--cached", "--name-only", "--", ...generatedChanges], cwd).trim();
       if (staged) run("git", ["commit", "-m", "Update nstack deploy artifacts"], { cwd, capture: true, env: gitCommitEnv() });
     });
   }
@@ -1616,11 +1620,11 @@ function gitCommitEnv() {
 }
 
 function sourceGeneratedChanges(cwd) {
-  return gitPorcelainPaths(cwd).filter((file) => isGeneratedDeployPath(file));
+  return gitPorcelainPaths(cwd).filter((file) => isGeneratedSourcePath(cwd, file));
 }
 
 function sourceOtherChanges(cwd) {
-  return gitPorcelainPaths(cwd).filter((file) => !isGeneratedDeployPath(file) && !isLocalNstackPath(file));
+  return gitPorcelainPaths(cwd).filter((file) => !isGeneratedSourcePath(cwd, file) && !isLocalNstackPath(file));
 }
 
 function isLocalNstackPath(file) {
@@ -1637,6 +1641,12 @@ function gitPorcelainPaths(cwd) {
 
 function isGeneratedDeployPath(file) {
   return file === generatedDir || file.startsWith(`${generatedDir}/`);
+}
+
+function isGeneratedSourcePath(cwd, file) {
+  if (isGeneratedDeployPath(file)) return true;
+  return file === encoreBackendGitignorePath
+    && readText(path.join(cwd, file), "") === encoreBackendGitignoreText;
 }
 
 function safeOutput(command, args, cwd) {

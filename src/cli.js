@@ -19,6 +19,7 @@ import { doctor } from "./doctor.js";
 import { openTarget } from "./open.js";
 import { installPackageManagerDependencies, promptPackageManager } from "./package-manager.js";
 import { pull } from "./pull.js";
+import { createProgress } from "./progress.js";
 import { runSecretCommand } from "./secrets.js";
 import { showStatus } from "./status.js";
 import { listTargets } from "./targets.js";
@@ -139,18 +140,21 @@ async function init(target, options) {
   const appName = options.name || path.basename(cwd);
   const slug = slugify(options.slug || appName);
   const packageManager = await initPackageManager(options);
-  copyTree(templateDir, cwd, {
-    APP_NAME: appName,
-    APP_SLUG: slug,
-  });
   const flagEnv = localDeployValues(options);
   const wizardEnv = await initDeployWizard(cwd, options, flagEnv, { defaultRepoName: slug });
   const localEnv = { ...flagEnv, ...wizardEnv };
-  if (Object.keys(localEnv).length > 0) {
-    mergeEnvFile(path.join(cwd, localEnvPathForTarget(localEnv.NSTACK_TARGET || "prod")), localEnv);
-  }
-  const install = installGeneratedDependencies(cwd, options, packageManager);
-  ensureInitialGitCommit(cwd, localEnv);
+  const progress = createProgress({ enabled: !options.json });
+  await progress.step("Writing project files", () => {
+    copyTree(templateDir, cwd, {
+      APP_NAME: appName,
+      APP_SLUG: slug,
+    });
+    if (Object.keys(localEnv).length > 0) {
+      mergeEnvFile(path.join(cwd, localEnvPathForTarget(localEnv.NSTACK_TARGET || "prod")), localEnv);
+    }
+  });
+  const install = await progress.step("Installing dependencies", () => installGeneratedDependencies(cwd, options, packageManager));
+  await progress.step("Creating initial git commit", () => ensureInitialGitCommit(cwd, localEnv));
   const report = initReport({
     cwd,
     appName,
@@ -422,9 +426,9 @@ async function promptRepositoryOwner({ prompter, choice, inferred = null }) {
 
   const choices = await loadRepositoryOwnerChoices(choice, inferred);
   if (choices.length > 0 && !prompter.yes) {
-    const manual = { label: "Enter manually", value: "__manual_owner__" };
-    const selected = await prompter.select("NSTACK_GIT_OWNER", "Git user/org", [...choices, manual]);
-    if (selected.value !== manual.value) return selected.value;
+    const custom = { label: "Custom", value: "__custom_owner__" };
+    const selected = await prompter.select("NSTACK_GIT_OWNER", "Git user/org", [...choices, custom]);
+    if (selected.value !== custom.value) return selected.value;
   }
 
   const defaultValue = choices[0]?.value || inferred?.owner || "";
@@ -450,13 +454,44 @@ async function promptGitHost({ prompter, sourceType, inferred = null }) {
   return cleanHost(host).toLowerCase();
 }
 
-export async function loadRepositoryOwnerChoices(choice, inferred = null) {
+export async function loadRepositoryOwnerChoices(choice, inferred = null, options = {}) {
+  const dokployOwners = await dokployRepositoryOwners(choice);
+  const creatableOwners = await creatableRepositoryOwners(choice, { token: options.token });
+  const publicOwners = options.includePublicFallback === false ? [] : await publicRepositoryOwners(choice);
+  const providerOwners = providerOwnerCandidates(choice.provider, choice.sourceType);
+  const inferredOwner = inferred && inferred.host === choice.host ? inferred.owner : "";
   const owners = [
-    ...(inferred && inferred.host === choice.host ? [inferred.owner] : []),
-    ...(await creatableRepositoryOwners(choice)),
-    ...providerOwnerCandidates(choice.provider, choice.sourceType),
+    ...currentRepositoryOwnerCandidates(choice, { dokployOwners, publicOwners }),
+    inferredOwner,
+    ...dokployOwners,
+    ...creatableOwners,
+    ...publicOwners,
+    ...providerOwners,
   ].map(normalizeRepositoryOwner).filter(Boolean);
   return [...new Set(owners)].map((owner) => ({ label: owner, value: owner }));
+}
+
+function currentRepositoryOwnerCandidates(choice, { dokployOwners = [], publicOwners = [] } = {}) {
+  return [
+    ...providerCurrentUserCandidates(choice.provider, choice.sourceType),
+    dokployOwners[0] || "",
+    publicOwners[0] || "",
+  ].filter(Boolean);
+}
+
+function providerCurrentUserCandidates(provider, sourceType) {
+  const details = provider?.[sourceType] || {};
+  const configured = provider?.__nstackConfiguredProvider || {};
+  const configuredDetails = configured?.[sourceType] || {};
+  const keys = {
+    github: ["githubUsername", "username", "login"],
+    gitlab: ["gitlabUsername", "username", "login"],
+    bitbucket: ["bitbucketUsername", "username"],
+    gitea: ["giteaUsername", "username", "login"],
+  }[sourceType] || [];
+  return [details, configuredDetails, configured]
+    .flatMap((value) => keys.map((key) => value?.[key]))
+    .filter((value) => typeof value === "string" && value.trim());
 }
 
 function providerOwnerCandidates(provider, sourceType) {
@@ -474,8 +509,48 @@ function providerOwnerCandidates(provider, sourceType) {
     .filter((value) => typeof value === "string" && value.trim());
 }
 
-async function creatableRepositoryOwners(choice) {
-  const token = providerAccessToken(choice.provider, choice.sourceType);
+async function dokployRepositoryOwners(choice) {
+  const client = choice.provider?.__nstackDokployClient;
+  const endpoint = dokployRepositoryEndpoint(choice.sourceType);
+  const providerId = choice.providerId || providerSpecificId(choice.provider, choice.sourceType);
+  if (!client || !endpoint || !providerId) return [];
+  try {
+    const repositories = asList(await client.trpcGet(endpoint, { [`${choice.sourceType}Id`]: providerId }));
+    return repositories.map(repositoryOwnerFromRepository).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function dokployRepositoryEndpoint(sourceType) {
+  return {
+    github: "github.getGithubRepositories",
+    gitlab: "gitlab.getGitlabRepositories",
+    bitbucket: "bitbucket.getBitbucketRepositories",
+    gitea: "gitea.getGiteaRepositories",
+  }[sourceType] || "";
+}
+
+function repositoryOwnerFromRepository(repo) {
+  return repo?.owner?.login
+    || repo?.owner?.username
+    || repo?.owner?.name
+    || repo?.namespace?.full_path
+    || repo?.namespace?.path
+    || ownerFromFullRepositoryName(repo?.full_name)
+    || ownerFromFullRepositoryName(repo?.path_with_namespace)
+    || ownerFromFullRepositoryName(repo?.url)
+    || "";
+}
+
+function ownerFromFullRepositoryName(value = "") {
+  const text = String(value || "").replace(/^https?:\/\/[^/]+\//, "").replace(/\.git$/i, "");
+  const parts = text.split("/").filter(Boolean);
+  return parts.length > 1 ? parts.slice(0, -1).join("/") : "";
+}
+
+async function creatableRepositoryOwners(choice, options = {}) {
+  const token = providerAccessToken(choice.provider, choice.sourceType, options.token);
   if (!token) return [];
   try {
     if (choice.sourceType === "github") return await githubCreatableOwners(token);
@@ -488,7 +563,8 @@ async function creatableRepositoryOwners(choice) {
   return [];
 }
 
-function providerAccessToken(provider, sourceType) {
+function providerAccessToken(provider, sourceType, explicitToken = "") {
+  if (explicitToken) return explicitToken;
   const details = provider?.[sourceType] || {};
   const configured = provider?.__nstackConfiguredProvider || {};
   const configuredDetails = configured?.[sourceType] || {};
@@ -536,7 +612,7 @@ async function gitlabCreatableOwners(host, token) {
   const headers = { authorization: `Bearer ${token}`, "PRIVATE-TOKEN": token };
   const [user, namespaces] = await Promise.all([
     fetchJson(`${base}/api/v4/user`, { headers }),
-    fetchJson(`${base}/api/v4/namespaces?per_page=100`, { headers }),
+    fetchJson(`${base}/api/v4/namespaces?per_page=100&owned_only=true`, { headers }),
   ]);
   return [
     user?.username,
@@ -568,6 +644,50 @@ async function giteaCreatableOwners(host, token) {
     if (!Array.isArray(teams) || teams.length === 0 || teams.some(giteaTeamCanCreateRepos)) orgOwners.push(name);
   }
   return [user?.login || user?.username, ...orgOwners].filter(Boolean);
+}
+
+async function publicRepositoryOwners(choice) {
+  if (choice.sourceType !== "gitea" || !choice.host) return [];
+  const base = gitApiBase(choice.host);
+  const candidates = localGitUserCandidates();
+  const users = [];
+  for (const candidate of candidates) {
+    const user = await fetchJson(`${base}/api/v1/users/${encodeURIComponent(candidate)}`).catch(() => null);
+    const login = user?.login || user?.username;
+    if (login) users.push(login);
+  }
+  const orgs = await fetchJson(`${base}/api/v1/orgs`).catch(() => []);
+  const repositories = await fetchJson(`${base}/api/v1/repos/search?limit=100`).catch(() => null);
+  return [
+    ...users,
+    ...asList(repositories?.data).map(repositoryOwnerFromRepository),
+    ...asList(orgs).map((org) => org.username || org.name),
+  ].filter(Boolean);
+}
+
+function localGitUserCandidates() {
+  const values = [
+    safeCommand("git", ["config", "--get", "user.name"]),
+    safeCommand("git", ["config", "--global", "--get", "user.name"]),
+    process.env.USER || "",
+  ];
+  return [...new Set(values.map(gitUserCandidate).filter(Boolean))];
+}
+
+function gitUserCandidate(value = "") {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_.-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function safeCommand(command, args) {
+  try {
+    return commandOutput(command, args).trim();
+  } catch {
+    return "";
+  }
 }
 
 function giteaTeamCanCreateRepos(team) {
@@ -754,17 +874,33 @@ function initReport({ cwd, appName, slug, template, localEnv, packageManager = {
     },
     packageManager: packageManager.name,
     install,
-    next: initNextSteps(localEnv, install),
+    next: initNextSteps({ cwd, localEnv, install, packageManager }),
   };
 }
 
-function initNextSteps(localEnv, install = { skipped: true }) {
+function initNextSteps({ cwd, localEnv, install = { skipped: true }, packageManager = { name: "pnpm" } }) {
   const linked = Boolean(localEnv.NSTACK_DOMAIN && localEnv.DOKPLOY_URL && localEnv.DOKPLOY_API_KEY && localEnv.NSTACK_REPOSITORY);
+  const cd = initCdStep(cwd);
   return [
-    ...(install.skipped ? ["pnpm install"] : []),
+    ...(cd ? [cd] : []),
+    ...(install.skipped ? [`${packageManager.name || "pnpm"} install`] : []),
     ...(linked ? [] : ["nstack configure --domain <domain> --dokploy-url <url> --dokploy-api-key <key> --repository <git-url>"]),
     "nstack deploy",
   ];
+}
+
+function initCdStep(cwd) {
+  const current = process.cwd();
+  const relative = path.relative(current, cwd);
+  if (!relative) return "";
+  const dir = relative.startsWith("..") || path.isAbsolute(relative) ? cwd : relative;
+  return `cd ${shellQuote(dir)}`;
+}
+
+function shellQuote(value) {
+  const text = String(value || "");
+  if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(text)) return text;
+  return `'${text.replaceAll("'", "'\\''")}'`;
 }
 
 function parseArgs(argv) {
@@ -873,10 +1009,12 @@ function help() {
   console.log(`nstack
 
 Start:
-  nstack init [dir]
-  cd <dir>
-  nstack configure --domain <host> --dokploy-url <url> --dokploy-api-key <key> --repository <git-url>
+  nstack init my-app
+  cd my-app
   nstack deploy
+
+Configure later:
+  nstack configure --domain <host> --dokploy-url <url> --dokploy-api-key <key> --repository <git-url>
 
 Daily commands:
   nstack deploy                  build, deploy, verify, and print the URL

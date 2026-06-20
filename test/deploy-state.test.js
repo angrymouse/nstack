@@ -1163,6 +1163,8 @@ test("deploy auto-commits generated source-backed artifacts before triggering Do
   execFileSync("git", ["commit", "-m", "initial"], { cwd, stdio: "ignore" });
   execFileSync("git", ["push", "-u", "origin", "main"], { cwd, stdio: "ignore" });
   const initialCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8" }).trim();
+  writeFileSync(path.join(cwd, "backend", ".gitignore"), "encore.gen.go\nencore.gen.cue\n/.encore\n/encore.gen\n");
+  assert.equal(execFileSync("git", ["status", "--short", "--untracked-files=all"], { cwd, encoding: "utf8" }).trim(), "?? backend/.gitignore");
 
   const envKeys = ["NSTACK_DOMAIN", "DOKPLOY_URL", "DOKPLOY_API_KEY"];
   const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
@@ -1204,7 +1206,9 @@ test("deploy auto-commits generated source-backed artifacts before triggering Do
     assert.notEqual(finalCommit, initialCommit);
     assert.equal(remoteCommit, finalCommit);
     assert.equal(report.release.commit, finalCommit);
-    assert.match(execFileSync("git", ["show", "--name-only", "--format=", "HEAD"], { cwd, encoding: "utf8" }), /deploy\/nstack\/compose\.dokploy\.yaml/);
+    const committedFiles = execFileSync("git", ["show", "--name-only", "--format=", "HEAD"], { cwd, encoding: "utf8" });
+    assert.match(committedFiles, /backend\/\.gitignore/);
+    assert.match(committedFiles, /deploy\/nstack\/compose\.dokploy\.yaml/);
   } finally {
     globalThis.fetch = originalFetch;
     for (const key of envKeys) {

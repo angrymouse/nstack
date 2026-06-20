@@ -937,7 +937,7 @@ export async function loadDokploySourceProviders(client) {
   const providers = asList(await client.trpcGet("gitProvider.getAll"))
     .filter((provider) => provider?.providerType);
   const configuredIdsByType = await loadConfiguredProviderIds(client, providers);
-  return providers.map((provider) => annotateSourceProvider(provider, configuredIdsByType));
+  return providers.map((provider) => annotateSourceProvider(provider, configuredIdsByType, client));
 }
 
 async function loadConfiguredProviderIds(client, providers) {
@@ -956,16 +956,24 @@ async function loadConfiguredProviderIds(client, providers) {
   return Object.fromEntries(entries);
 }
 
-function annotateSourceProvider(provider, configuredIdsByType) {
+function annotateSourceProvider(provider, configuredIdsByType, client = null) {
   const type = provider.providerType;
   const configuredRecords = configuredIdsByType[type];
-  if (!Array.isArray(configuredRecords)) return provider;
-  const configured = configuredRecords.find((record) => configuredProviderListId(record, type) === providerSpecificId(provider, type)) || null;
-  return {
+  const configured = Array.isArray(configuredRecords)
+    ? configuredRecords.find((record) => configuredProviderListId(record, type) === providerSpecificId(provider, type)) || null
+    : null;
+  const annotated = {
     ...provider,
-    __nstackSourceConfigured: Boolean(configured),
+    ...(Array.isArray(configuredRecords) ? { __nstackSourceConfigured: Boolean(configured) } : {}),
     ...(configured ? { __nstackConfiguredProvider: configured } : {}),
   };
+  if (client) {
+    Object.defineProperty(annotated, "__nstackDokployClient", {
+      value: client,
+      enumerable: false,
+    });
+  }
+  return annotated;
 }
 
 function configuredProviderEndpoint(type) {
