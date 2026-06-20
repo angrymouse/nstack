@@ -1163,14 +1163,20 @@ test("deploy auto-commits generated source-backed artifacts before triggering Do
   execFileSync("git", ["commit", "-m", "initial"], { cwd, stdio: "ignore" });
   execFileSync("git", ["push", "-u", "origin", "main"], { cwd, stdio: "ignore" });
   const initialCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8" }).trim();
+  writeFileSync(path.join(cwd, "backend", "api", "status.ts"), `export const ok = "changed";\n`);
   writeFileSync(path.join(cwd, "backend", ".gitignore"), "encore.gen.go\nencore.gen.cue\n/.encore\n/encore.gen\n");
-  assert.equal(execFileSync("git", ["status", "--short", "--untracked-files=all"], { cwd, encoding: "utf8" }).trim(), "?? backend/.gitignore");
+  assert.deepEqual(execFileSync("git", ["status", "--short", "--untracked-files=all"], { cwd, encoding: "utf8" }).split(/\r?\n/).filter(Boolean), [
+    " M backend/api/status.ts",
+    "?? backend/.gitignore",
+  ]);
 
-  const envKeys = ["NSTACK_DOMAIN", "DOKPLOY_URL", "DOKPLOY_API_KEY"];
+  const envKeys = ["NSTACK_DOMAIN", "DOKPLOY_URL", "DOKPLOY_API_KEY", "NSTACK_COMMIT_UNSTAGED_CHANGES", "NSTACK_COMMIT_MESSAGE"];
   const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
   process.env.NSTACK_DOMAIN = "source-sync.example.test";
   process.env.DOKPLOY_URL = "https://dokploy.example.test";
   process.env.DOKPLOY_API_KEY = "dummy";
+  process.env.NSTACK_COMMIT_UNSTAGED_CHANGES = "true";
+  process.env.NSTACK_COMMIT_MESSAGE = "Update app status";
 
   const calls = [];
   const originalFetch = globalThis.fetch;
@@ -1209,6 +1215,11 @@ test("deploy auto-commits generated source-backed artifacts before triggering Do
     const committedFiles = execFileSync("git", ["show", "--name-only", "--format=", "HEAD"], { cwd, encoding: "utf8" });
     assert.match(committedFiles, /backend\/\.gitignore/);
     assert.match(committedFiles, /deploy\/nstack\/compose\.dokploy\.yaml/);
+    assert.deepEqual(execFileSync("git", ["log", "-2", "--pretty=%s"], { cwd, encoding: "utf8" }).trim().split("\n"), [
+      "Update nstack deploy artifacts",
+      "Update app status",
+    ]);
+    assert.match(execFileSync("git", ["show", "--name-only", "--format=", "HEAD~1"], { cwd, encoding: "utf8" }), /backend\/api\/status\.ts/);
   } finally {
     globalThis.fetch = originalFetch;
     for (const key of envKeys) {
@@ -1225,6 +1236,90 @@ test("deploy auto-commits generated source-backed artifacts before triggering Do
   }));
   assert.equal(deployCall.body.description.startsWith("Deploy "), true);
   assert.equal(env.NSTACK_GIT_COMMIT, deployCall.body.description.replace(/^Deploy /, ""));
+});
+
+test("deploy aborts source-backed deploy when app change commit is declined", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "nstack-source-dirty-decline-"));
+  const cwd = path.join(root, "app");
+  const remote = path.join(root, "remote.git");
+  mkdirSync(path.join(cwd, "backend", "api"), { recursive: true });
+  mkdirSync(path.join(cwd, "frontend"), { recursive: true });
+  writeFileSync(path.join(cwd, "nstack.config.mjs"), `export default {
+  app: { name: "Dirty Decline", slug: "dirty-decline" },
+  deploy: {
+    buildMode: "compose",
+    source: {
+      repository: "git@git.example.test:acme/dirty-decline.git",
+      branch: "main",
+      giteaId: "gitea-1"
+    }
+  },
+  verify: { endpoints: [] },
+};\n`);
+  writeFileSync(path.join(cwd, "backend", "api", "status.ts"), `export const ok = true;\n`);
+  writeFileSync(path.join(cwd, "backend", "Dockerfile"), "FROM scratch\n");
+  writeFileSync(path.join(cwd, "frontend", "Dockerfile"), "FROM scratch\n");
+  execFileSync("git", ["init", "--bare", remote], { stdio: "ignore" });
+  execFileSync("git", ["init"], { cwd, stdio: "ignore" });
+  execFileSync("git", ["config", "user.email", "nstack@example.test"], { cwd });
+  execFileSync("git", ["config", "user.name", "nstack"], { cwd });
+  execFileSync("git", ["branch", "-M", "main"], { cwd });
+  execFileSync("git", ["remote", "add", "origin", remote], { cwd });
+  execFileSync("git", ["add", "."], { cwd });
+  execFileSync("git", ["commit", "-m", "initial"], { cwd, stdio: "ignore" });
+  writeFileSync(path.join(cwd, "backend", "api", "status.ts"), `export const ok = "dirty";\n`);
+
+  const envKeys = ["NSTACK_DOMAIN", "DOKPLOY_URL", "DOKPLOY_API_KEY", "NSTACK_COMMIT_UNSTAGED_CHANGES"];
+  const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+  process.env.NSTACK_DOMAIN = "dirty-decline.example.test";
+  process.env.DOKPLOY_URL = "https://dokploy.example.test";
+  process.env.DOKPLOY_API_KEY = "dummy";
+  process.env.NSTACK_COMMIT_UNSTAGED_CHANGES = "false";
+
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    const parsed = new URL(String(url));
+    const endpoint = parsed.pathname.replace(/^\/api\/(?:trpc\/)?/, "");
+    calls.push(endpoint);
+    if ((init.method || "GET") === "GET") {
+      if (endpoint === "gitProvider.getAll") {
+        return Response.json({ json: [{ providerType: "gitea", gitea: { giteaId: "gitea-1", giteaUrl: "https://git.example.test", isConfigured: true } }] });
+      }
+      if (endpoint === "gitea.giteaProviders") return Response.json({ json: [{ giteaId: "gitea-1" }] });
+      if (endpoint === "project.all" || endpoint === "environment.byProjectId" || endpoint === "compose.search" || endpoint === "domain.byComposeId" || endpoint === "schedule.list") {
+        return Response.json({ json: [] });
+      }
+      if (endpoint === "settings.getIp") return Response.json({ json: "203.0.113.10" });
+    }
+    if (endpoint === "domain.validateDomain") return Response.json({ json: { isValid: true, resolvedIp: "203.0.113.10" } });
+    const ids = {
+      "project.create": { projectId: "project-1" },
+      "environment.create": { environmentId: "environment-1" },
+    };
+    return Response.json({ json: ids[endpoint] || {} });
+  };
+
+  try {
+    await assert.rejects(
+      deploy({ cwd, noWait: true, skipVerify: true, skipStatus: true, yes: true }),
+      (error) => {
+        assert.match(error.message, /Source-backed deploy aborted because app changes were not committed/);
+        assert.match(error.message, /backend\/api\/status\.ts/);
+        return true;
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const key of envKeys) {
+      if (originalEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = originalEnv[key];
+    }
+  }
+
+  assert.equal(calls.includes("compose.create"), false);
+  assert.equal(calls.includes("compose.update"), false);
+  assert.equal(execFileSync("git", ["log", "-1", "--pretty=%s"], { cwd, encoding: "utf8" }).trim(), "initial");
 });
 
 test("deploy explains provider-backed source push failures before Compose upsert", async () => {
@@ -1290,7 +1385,10 @@ test("deploy explains provider-backed source push failures before Compose upsert
       deploy({ cwd, noWait: true, skipVerify: true, skipStatus: true, yes: true }),
       (error) => {
         assert.match(error.message, /Could not push source repository https:\/\/github\.com\/acme\/missing\.git/);
-        assert.match(error.message, /Create a private repository on your Git provider and push this app before deploying/);
+        assert.match(error.message, /Create a private repository on your Git provider if it does not exist/);
+        assert.doesNotMatch(error.message, /git remote add origin/);
+        assert.match(error.message, /Git reported: git push -u origin main failed/);
+        assert.doesNotMatch(error.message, /HEAD:main/);
         assert.match(error.message, /git push -u origin main/);
         return true;
       },

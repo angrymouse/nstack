@@ -253,6 +253,7 @@ export async function deploy(options = {}) {
   writeText(composeFile, renderDokployCompose(ctx));
 
   const composeSource = await progress.step("Resolving Git source", () => provider.resolveComposeSource());
+  await maybeCommitSourceUserChanges(cwd, composeSource, options);
   const sourceSync = await progress.step("Pushing source repository", () => syncSourceDeployArtifacts(cwd, config, composeSource, timings));
   if (sourceSync.release) release = sourceSync.release;
   const composeId = await progress.step("Updating Dokploy Compose app", () => provider.upsertCompose(
@@ -1561,12 +1562,7 @@ async function syncSourceDeployArtifacts(cwd, config, source = null, timings = [
   const generatedChanges = sourceGeneratedChanges(cwd);
   const otherChanges = sourceOtherChanges(cwd);
   if (otherChanges.length > 0) {
-    throw new Error([
-      "Source-backed deploy found uncommitted app changes.",
-      "Commit or stash app changes first; nstack only auto-commits generated deploy artifacts.",
-      ...otherChanges.slice(0, 8).map((file) => `  - ${file}`),
-      ...(otherChanges.length > 8 ? [`  - ${otherChanges.length - 8} more`] : []),
-    ].join("\n"));
+    throw sourceUncommittedChangesError(otherChanges);
   }
 
   if (generatedChanges.length > 0) {
@@ -1585,28 +1581,90 @@ async function syncSourceDeployArtifacts(cwd, config, source = null, timings = [
         return;
       }
       const branch = config.deploy.source?.branch || source.branch || safeOutput("git", ["branch", "--show-current"], cwd).trim() || "main";
-      run("git", ["push", "-u", "origin", `HEAD:${branch}`], { cwd, capture: true });
+      pushInitialSourceBranch(cwd, branch);
     } catch (error) {
-      throw sourcePushError({ config, source, error });
+      throw sourcePushError({ cwd, config, source, error });
     }
   });
 
   return { release: releaseInfo(config, cwd) };
 }
 
-function sourcePushError({ config, source, error }) {
+async function maybeCommitSourceUserChanges(cwd, source = null, options = {}) {
+  if (!source || source.sourceType === "raw") return;
+  const otherChanges = sourceOtherChanges(cwd);
+  if (otherChanges.length === 0) return;
+  if (options.json) throw sourceUncommittedChangesError(otherChanges);
+
+  printSourceChanges(otherChanges);
+  const prompter = new Prompter({ yes: options.yes });
+  try {
+    const shouldCommit = await prompter.confirm("NSTACK_COMMIT_UNSTAGED_CHANGES", "Commit all unstaged changes?", { defaultValue: false });
+    if (!shouldCommit) throw sourceUncommittedChangesError(otherChanges, { declined: true });
+    const message = await prompter.ask("NSTACK_COMMIT_MESSAGE", "Commit message");
+    commitSourceUserChanges(cwd, otherChanges, message);
+  } finally {
+    prompter.close();
+  }
+}
+
+function commitSourceUserChanges(cwd, files, message) {
+  run("git", ["add", "--", ...files], { cwd, capture: true });
+  const staged = safeOutput("git", ["diff", "--cached", "--name-only", "--", ...files], cwd).trim();
+  if (!staged) return;
+  run("git", ["commit", "-m", message], { cwd, capture: true, env: gitCommitEnv() });
+}
+
+function printSourceChanges(changes) {
+  console.log("Source-backed deploy found uncommitted app changes:");
+  for (const file of changes.slice(0, 8)) console.log(`  - ${file}`);
+  if (changes.length > 8) console.log(`  - ${changes.length - 8} more`);
+}
+
+function sourceUncommittedChangesError(changes, { declined = false } = {}) {
+  return new Error([
+    declined
+      ? "Source-backed deploy aborted because app changes were not committed."
+      : "Source-backed deploy found uncommitted app changes.",
+    "Commit or stash app changes first; nstack only auto-commits generated deploy artifacts.",
+    ...changes.slice(0, 8).map((file) => `  - ${file}`),
+    ...(changes.length > 8 ? [`  - ${changes.length - 8} more`] : []),
+  ].join("\n"));
+}
+
+function pushInitialSourceBranch(cwd, branch) {
+  const currentBranch = safeOutput("git", ["branch", "--show-current"], cwd).trim();
+  if (currentBranch && currentBranch === branch) {
+    run("git", ["push", "-u", "origin", currentBranch], { cwd, capture: true });
+    return;
+  }
+  if (currentBranch) {
+    run("git", ["push", "-u", "origin", `${currentBranch}:${branch}`], { cwd, capture: true });
+    return;
+  }
+  run("git", ["push", "-u", "origin", `HEAD:${branch}`], { cwd, capture: true });
+}
+
+function sourcePushError({ cwd, config, source, error }) {
   const repository = config.deploy.source?.repository || source.repositoryUrl || "origin";
   const branch = config.deploy.source?.branch || source.branch || "main";
+  const origin = safeOutput("git", ["remote", "get-url", "origin"], cwd).trim();
   return new Error([
     `Could not push source repository ${repository}.`,
-    "Create a private repository on your Git provider and push this app before deploying, or fix your git credentials:",
-    `  git remote add origin ${repository}`,
+    "Create a private repository on your Git provider if it does not exist, then push this app or fix your git credentials:",
+    ...sourcePushRemoteRecovery(origin, repository).map((step) => `  ${step}`),
     "  git add .",
     "  git commit -m \"init\"",
     `  git push -u origin ${branch}`,
     "",
     `Git reported: ${summarizeError(error)}`,
   ].join("\n"), { cause: error });
+}
+
+function sourcePushRemoteRecovery(origin, repository) {
+  if (!origin) return [`git remote add origin ${repository}`];
+  if (origin !== repository) return [`git remote set-url origin ${repository}`];
+  return [];
 }
 
 function gitCommitEnv() {
