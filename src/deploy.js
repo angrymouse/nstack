@@ -191,6 +191,13 @@ export async function deploy(options = {}) {
   nextState.dokploy.environmentId = environmentId;
   persistState();
 
+  if (resources.source === "encore-metadata") {
+    await progress.step("Pruning removed Dokploy resources", async () => {
+      await pruneRemovedDokployResources({ provider, environmentId, resources, state: nextState, infra });
+      persistState();
+    });
+  }
+
   if (resources.buckets.length > 0) {
     await progress.step("Preparing object storage", async () => {
       const existingComposeId = await provider.resolveComposeId(environmentId);
@@ -352,6 +359,31 @@ function clearDokployResourceState(dokploy) {
   delete dokploy.postgresId;
   delete dokploy.redisId;
   delete dokploy.schedules;
+}
+
+async function pruneRemovedDokployResources({ provider, environmentId, resources, state, infra }) {
+  if (resources.databases.length === 0) {
+    const postgresId = await provider.resolvePostgresId(environmentId);
+    if (postgresId) await provider.removePostgres(postgresId);
+    delete state.dokploy.postgresId;
+    deleteInfraSection(state, infra, "postgres");
+  }
+  if (resources.caches.length === 0) {
+    const redisId = await provider.resolveRedisId(environmentId);
+    if (redisId) await provider.removeRedis(redisId);
+    delete state.dokploy.redisId;
+    deleteInfraSection(state, infra, "redis");
+  }
+  if (resources.buckets.length === 0) {
+    deleteInfraSection(state, infra, "objectStorage");
+  }
+}
+
+function deleteInfraSection(state, infra, key) {
+  if (infra) delete infra[key];
+  if (!state.infra) return;
+  delete state.infra[key];
+  if (Object.keys(state.infra).length === 0) delete state.infra;
 }
 
 export async function waitForDeployment(options = {}) {
@@ -1728,24 +1760,30 @@ function ensureInfraSecrets({ config, resources, state }) {
   const existing = state.infra || {};
   const postgresName = `${config.app.slug}-postgres`;
   const redisName = `${config.app.slug}-redis`;
-  return {
-    postgres: {
+  const infra = {};
+  if (resources.databases.length > 0) {
+    infra.postgres = {
       appName: postgresName,
       host: existing.postgres?.host || `${postgresName}:5432`,
       database: existing.postgres?.database || defaultPostgresDatabase(config, resources),
       user: existing.postgres?.user || "nstack",
-      password: existing.postgres?.password || (resources.databases.length ? randomSecret(24) : ""),
-    },
-    redis: {
+      password: existing.postgres?.password || randomSecret(24),
+    };
+  }
+  if (resources.caches.length > 0) {
+    infra.redis = {
       appName: redisName,
       host: existing.redis?.host || `${redisName}:6379`,
-      password: existing.redis?.password || (resources.caches.length ? randomSecret(24) : ""),
-    },
-    objectStorage: objectStorageInfra(config, existing.objectStorage, {
-      accessKey: existing.objectStorage?.accessKey || (resources.buckets.length ? randomSecret(16) : ""),
-      secretKey: existing.objectStorage?.secretKey || (resources.buckets.length ? randomSecret(32) : ""),
-    }),
-  };
+      password: existing.redis?.password || randomSecret(24),
+    };
+  }
+  if (resources.buckets.length > 0) {
+    infra.objectStorage = objectStorageInfra(config, existing.objectStorage, {
+      accessKey: existing.objectStorage?.accessKey || randomSecret(16),
+      secretKey: existing.objectStorage?.secretKey || randomSecret(32),
+    });
+  }
+  return infra;
 }
 
 function defaultPostgresDatabase(config, resources) {
