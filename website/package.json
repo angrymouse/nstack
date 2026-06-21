@@ -1,5 +1,5 @@
 {
-  "name": "__APP_SLUG__",
+  "name": "nstack",
   "private": true,
   "type": "module",
   "scripts": {

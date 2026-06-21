@@ -117,7 +117,8 @@ exit 1
   assert.match(rootDockerignore, /!\.git\/packed-refs/);
 
   const manifest = JSON.parse(readFileSync(path.join(target, "package.json"), "utf8"));
-  assert.deepEqual(Object.keys(manifest.scripts).sort(), ["build", "check", "deploy", "dev", "status"]);
+  assert.deepEqual(Object.keys(manifest.scripts).sort(), ["build", "check", "deploy", "dev", "setup", "status"]);
+  assert.equal(manifest.scripts.setup, "node scripts/nstack-local.mjs setup");
   assert.equal(manifest.scripts.dev, "node scripts/dev.mjs");
   assert.equal(manifest.scripts.build, "node scripts/nstack-client.mjs gen && pnpm --dir frontend build");
   assert.equal(manifest.scripts.check, "node scripts/check.mjs");
@@ -127,6 +128,9 @@ exit 1
   const generatedConfig = readFileSync(path.join(target, "nstack.config.mjs"), "utf8");
   assert.match(generatedConfig, /frontendContext: "\."/);
   assert.match(generatedConfig, /path: "\/api\/ready"/);
+
+  const encoreApp = JSON.parse(readFileSync(path.join(target, "backend", "encore.app"), "utf8"));
+  assert.equal(encoreApp.id, "");
 
   const frontendDockerfile = readFileSync(path.join(target, "frontend", "Dockerfile"), "utf8");
   assert.match(frontendDockerfile, /COPY pnpm-lock\.yaml \.\//);
@@ -162,9 +166,6 @@ exit 1
 
   const backendManifest = JSON.parse(readFileSync(path.join(target, "backend", "package.json"), "utf8"));
   assert.equal(backendManifest.scripts.test, "node --test");
-
-  const encoreApp = JSON.parse(readFileSync(path.join(target, "backend", "encore.app"), "utf8"));
-  assert.equal(encoreApp.id, "app");
 
   const generatedClient = readFileSync(path.join(target, "frontend", "app", "generated", "encore-client.ts"), "utf8");
   assert.match(generatedClient, /Client is an API client for the app Encore application/);
@@ -247,7 +248,7 @@ test("init next steps enter the generated project directory", async () => {
     const report = await runCli(["init", "web-app", "--yes", "--skip-install"]);
     assert.deepEqual(report.next, [
       "cd web-app",
-      "pnpm install",
+      "nstack setup",
       "nstack configure --domain <domain> --dokploy-url <url> --dokploy-api-key <key> --repository <git-url>",
       "nstack deploy",
     ]);
@@ -387,7 +388,7 @@ test("init skips deploy wizard when stdin is not interactive", async () => {
   assert.equal(report.files.localEnv, null);
   assert.deepEqual(report.next, [
     `cd ${target}`,
-    "pnpm install",
+    "nstack setup",
     "nstack configure --domain <domain> --dokploy-url <url> --dokploy-api-key <key> --repository <git-url>",
     "nstack deploy",
   ]);
@@ -448,7 +449,7 @@ test("init can write provider-specific source settings non-interactively", async
     "--watch-paths",
     "backend/**,frontend/**,deploy/nstack/**",
   ]);
-  assert.deepEqual(report.next, [`cd ${target}`, "pnpm install", "nstack deploy"]);
+  assert.deepEqual(report.next, [`cd ${target}`, "nstack setup", "nstack deploy"]);
   assert.equal(report.deploy.source.type, "gitlab");
 
   const config = readFileSync(path.join(target, "nstack.config.mjs"), "utf8");

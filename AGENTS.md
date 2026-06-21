@@ -2,6 +2,10 @@
 
 This repository builds the `nstack` CLI and project templates.
 
+## Versioning
+
+Bump the package version in `package.json` for every repository change or commit.
+
 ## Template Documentation Maintenance
 
 When changing nstack behavior, CLI flows, deployment semantics, generated files,

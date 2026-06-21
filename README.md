@@ -5,8 +5,10 @@
 It keeps the app shape boring:
 
 ```sh
+curl -fsSL https://nstack.playground.nik.technology/install.sh | bash
 nstack init my-app
 cd my-app
+nstack setup
 nstack deploy
 ```
 
@@ -38,6 +40,7 @@ path that gives Dokploy native push webhooks.
 ## Daily Commands
 
 ```sh
+nstack setup    # install local tooling and dependencies
 pnpm dev        # or: nstack dev
 nstack devexec 'await apiJson("/status")'
 pnpm check
@@ -61,16 +64,23 @@ nstack cleanup
 nstack open dashboard
 ```
 
-The generated app keeps the package scripts small. `pnpm dev` runs the same
-local orchestrator as `nstack dev`: Encore backend, Nuxt frontend, and generated
+The generated app keeps the package scripts small. `nstack setup` installs
+project dependencies, bootstraps pnpm through Corepack when needed, installs the
+Encore CLI with the official installer when it is missing, and checks Docker
+only when declared Encore resources need it. `pnpm dev` runs the same local
+orchestrator as `nstack dev`: Encore backend, Nuxt frontend, and generated
 client sync for HMR. On a fresh clone, `pnpm dev`/`nstack dev` and `pnpm check`
-install missing pnpm dependencies before running local checks. They also fail
-early with direct setup instructions when the Encore CLI or Docker daemon is
-missing. `pnpm check`, `pnpm build`, and `nstack deploy` sync the Encore
-TypeScript client used by the Nuxt frontend. `nstack client gen` is available
-when you explicitly want to regenerate it. Client generation and deploy metadata
-use local Encore commands for Dokploy/nstack targets; Encore Cloud login is not
-required.
+reuse the same local setup path before running. They stop with direct
+instructions when Docker is not running or cannot be accessed. `pnpm check`,
+`pnpm build`, and `nstack deploy` sync the Encore TypeScript client used by the
+Nuxt frontend. `nstack client gen` is available when you explicitly want to
+regenerate it. Client generation and deploy metadata use local Encore commands
+for Dokploy/nstack targets; Encore Cloud login is not required.
+
+Generated templates intentionally keep `backend/encore.app` with an empty
+Encore app id. That is Encore's local-only mode and prevents local
+`encore run` or `encore check` from fetching Encore Cloud secrets. nstack uses
+`nstack.config.mjs` `app.slug` as the Dokploy/nstack identity instead.
 
 When `nstack dev` detects an AI coding harness such as Codex or Claude Code, it
 refuses to start a long-running dev server by default. Agents should use

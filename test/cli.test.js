@@ -195,6 +195,37 @@ writeFileSync("dev-ran.txt", "ok");
   assert.equal(typeof json.harness.detected, "boolean");
 });
 
+test("cli runs the generated app setup runner", async () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "nstack-setup-cli-"));
+  mkdirSync(path.join(cwd, "scripts"), { recursive: true });
+  writeFileSync(path.join(cwd, "scripts", "nstack-local.mjs"), `
+import { writeFileSync } from "node:fs";
+writeFileSync("setup-ran.txt", process.argv.slice(2).join("\\n"));
+`);
+
+  const output = [];
+  const originalLog = console.log;
+  try {
+    console.log = (value = "") => output.push(String(value));
+    const report = await runCli(["--cwd", cwd, "setup", "--skip-install", "--skip-tools", "--skip-docker", "--json"]);
+    assert.equal(report.mode, "generated-app");
+    assert.equal(report.script, "scripts/nstack-local.mjs");
+  } finally {
+    console.log = originalLog;
+  }
+
+  assert.equal(readFileSync(path.join(cwd, "setup-ran.txt"), "utf8"), [
+    "setup",
+    "--skip-install",
+    "--skip-tools",
+    "--skip-docker",
+  ].join("\n"));
+  assert.deepEqual(JSON.parse(output.join("\n")), {
+    mode: "generated-app",
+    script: "scripts/nstack-local.mjs",
+  });
+});
+
 test("cli blocks nstack dev under AI harnesses unless explicitly allowed", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "nstack-dev-ai-block-"));
   mkdirSync(path.join(cwd, "scripts"), { recursive: true });
@@ -295,9 +326,9 @@ test("cli reports version in text and json modes", async () => {
     console.log = originalLog;
   }
 
-  assert.equal(output[0], "nstack 0.1.0");
-  assert.deepEqual(JSON.parse(output[1]), { name: "nstack", version: "0.1.0" });
-  assert.equal(output[2], "nstack 0.1.0");
+  assert.equal(output[0], "nstack 0.1.1");
+  assert.deepEqual(JSON.parse(output[1]), { name: "nstack", version: "0.1.1" });
+  assert.equal(output[2], "nstack 0.1.1");
 });
 
 test("--ci fails instead of prompting for missing deploy settings", async () => {

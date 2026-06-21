@@ -4,6 +4,7 @@ import { commandOutput, readJSON, readText, run, writeJSON, writeText } from "./
 
 const schemaVersion = 1;
 const supportedPackageManagers = ["pnpm"];
+const defaultPnpmVersion = "10.18.3";
 
 export const packageManagerEnv = "NSTACK_PACKAGE_MANAGER";
 export const rememberPackageManagerEnv = "NSTACK_REMEMBER_PACKAGE_MANAGER";
@@ -32,6 +33,7 @@ export async function promptPackageManager(prompter, {
   file = settingsPath(),
   requireAvailable = true,
 } = {}) {
+  if (requireAvailable) bootstrapPnpmWithCorepack();
   const explicit = normalizePackageManager(requested || process.env[packageManagerEnv] || "");
   if (explicit) return resolvePackageManager(explicit, { requireAvailable });
 
@@ -198,6 +200,23 @@ function packageManagerVersion(name) {
   } catch {
     return "";
   }
+}
+
+function bootstrapPnpmWithCorepack() {
+  if (packageManagerVersion("pnpm")) return;
+  if (toolBootstrapDisabled()) return;
+  try {
+    commandOutput("corepack", ["--version"]);
+    console.log(`pnpm is missing; enabling Corepack and activating pnpm@${defaultPnpmVersion}...`);
+    run("corepack", ["enable"], { capture: true });
+    run("corepack", ["prepare", `pnpm@${defaultPnpmVersion}`, "--activate"], { capture: true });
+  } catch {
+    // promptPackageManager will raise the normal pnpm-required error below.
+  }
+}
+
+function toolBootstrapDisabled() {
+  return ["0", "false", "off", "no"].includes(String(process.env.NSTACK_AUTO_INSTALL_TOOLS || "").trim().toLowerCase());
 }
 
 function normalizePackageManager(value = "") {

@@ -18,6 +18,9 @@ The generated app stays ordinary:
 - `frontend/` is a Nuxt app.
 - `frontend/app/generated/encore-client.ts` is generated from exposed and
   authenticated Encore APIs and consumed through `apiClient()`.
+- `backend/encore.app` intentionally keeps the Encore app id empty so local
+  Encore commands run in local-only mode without fetching Encore Cloud secrets.
+  nstack uses `nstack.config.mjs` `app.slug` as the Dokploy/nstack identity.
 - Dokploy Domains/Traefik route traffic; nstack does not add Caddy or a proxy container.
 - Dokploy Compose builds and runs backend and frontend containers.
 - Dokploy native resources are used where they map to Encore resources.
@@ -45,16 +48,29 @@ https://github.com/acme/my-app.git
 
 Use a host name for `--domain`, not a URL with `https://`.
 
-### 1. Check Local Tools
+### 1. Install And Check Local Tools
 
-You need Node 22 or newer and pnpm:
+You need Node 22 or newer. Install the nstack CLI with the curl installer:
+
+```sh
+curl -fsSL https://nstack.playground.nik.technology/install.sh | bash
+```
+
+The installer creates a user-owned checkout under `~/.nstack`, activates pnpm
+with Corepack when needed, installs dependencies, and links `nstack` into
+`~/.local/bin`. If that directory is not on `PATH`, add it before continuing.
+
+Check the tools:
 
 ```sh
 node --version
-pnpm --version
+nstack --version
 ```
 
-If `nstack` is not globally installed, run it through the package manager or the local checkout you are using for nstack development. In a generated app, `nstack` is expected to be available on `PATH`.
+Generated apps also provide `nstack setup`, which installs project
+dependencies, bootstraps pnpm through Corepack when needed, installs the Encore
+CLI with the official installer when it is missing, and checks Docker only when
+declared resources need it.
 
 ### 2. Prepare The Server
 
@@ -210,13 +226,14 @@ Create the app:
 ```sh
 nstack init my-app
 cd my-app
+nstack setup
 ```
 
 Interactive `nstack init` asks whether to set up Dokploy deployment now. If you say yes, it asks for the app domain, then lets you pick a saved Dokploy instance or choose `Add new` to save a URL and API key for later projects. It then lists the Git providers already connected in Dokploy. Pick the matching provider, or choose manual Git configuration for a new/custom source.
 
 Init asks which package manager to use, with pnpm as the default when it is available. The Encore + Nuxt template currently supports pnpm. You can let nstack remember pnpm as the default for future projects, or pass `--package-manager pnpm` / set `NSTACK_PACKAGE_MANAGER=pnpm` in automation.
 
-Init also runs `pnpm install` and `pnpm approve-builds --all`, initializes git in the generated app, creates the first commit with message `init`, and sets `origin` to the configured repository URL when one is known. If you add the repository later with `nstack configure --repository <git-url>`, nstack sets `origin` when the repo does not already have one.
+Init also runs `pnpm install` and `pnpm approve-builds --all`, initializes git in the generated app, creates the first commit with message `init`, and sets `origin` to the configured repository URL when one is known. If you add the repository later with `nstack configure --repository <git-url>`, nstack sets `origin` when the repo does not already have one. On cloned or manually copied apps, `nstack setup` performs the local setup work without scaffolding a new app.
 
 For automation or a scaffold-only run, use:
 
@@ -247,15 +264,16 @@ nstack dev
 
 `pnpm dev` and `nstack dev` run the same local orchestrator: Encore backend,
 generated client watcher, and Nuxt frontend. On a fresh clone, `pnpm dev` and
-`pnpm check` install missing pnpm dependencies before starting local work. They
-also fail early with direct setup instructions when the Encore CLI or Docker
-daemon is missing. The client watcher only rewrites the generated client when
-the output changes, so Nuxt HMR is not triggered by backend edits that leave the
-API surface unchanged. `pnpm check`, `pnpm build`, and `nstack deploy` also
-sync the client automatically. Use `nstack client gen` only when you explicitly
-want to regenerate the client outside the normal workflow. The generator and
-deployment resource discovery use local Encore metadata for Dokploy/nstack
-targets; Encore Cloud login is not required.
+`pnpm check` reuse the same local setup path before starting work: they install
+dependencies, bootstrap pnpm through Corepack when needed, install the Encore
+CLI when it is missing, and stop with direct Docker instructions only when
+Docker is needed but unavailable. The client watcher only rewrites the generated
+client when the output changes, so Nuxt HMR is not triggered by backend edits
+that leave the API surface unchanged. `pnpm check`, `pnpm build`, and
+`nstack deploy` also sync the client automatically. Use `nstack client gen` only
+when you explicitly want to regenerate the client outside the normal workflow.
+The generator and deployment resource discovery use local Encore metadata for
+Dokploy/nstack targets; Encore Cloud login is not required.
 
 When `nstack dev` detects an AI coding harness such as Codex, Claude Code, or a
 custom `NSTACK_AGENT_HARNESS=<name>` value, it refuses to start a long-running
@@ -906,7 +924,7 @@ Avoid these during normal Dokploy deploys:
 A minimal CI check can run:
 
 ```sh
-pnpm install
+nstack setup
 pnpm check
 nstack render --ci
 ```
@@ -973,6 +991,8 @@ nstack init [dir] --name "My App" --slug my-app
 nstack init [dir] --force --yes
 nstack init [dir] --package-manager pnpm
 nstack init [dir] --skip-install
+nstack setup
+nstack setup --skip-docker
 ```
 
 Link or update deploy settings:

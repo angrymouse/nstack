@@ -25,6 +25,7 @@ import { installPackageManagerDependencies, promptPackageManager } from "./packa
 import { pull } from "./pull.js";
 import { createProgress } from "./progress.js";
 import { runSecretCommand } from "./secrets.js";
+import { runSetup } from "./setup.js";
 import { showStatus } from "./status.js";
 import { runTargetCommand } from "./targets.js";
 import { undeploy } from "./undeploy.js";
@@ -57,6 +58,9 @@ const booleanOptions = new Set([
   "follow",
   "watch",
   "metadataOnly",
+  "skipDocker",
+  "skipTools",
+  "noTools",
 ]);
 const valueOptions = new Set([
   "cwd",
@@ -131,6 +135,7 @@ export async function runCli(argv) {
   if (command === "cleanup" || command === "clean") return cleanup(options);
   if (command === "undeploy" || command === "destroy") return undeploy(options);
   if (command === "open") return openTarget(args, options);
+  if (command === "setup" || command === "install") return setup(args, options);
   if (command === "dev") return dev(args, options);
   if (command === "devexec" || command === "dev-exec") return devexec(args, options);
   if (command === "client") return client(args, options);
@@ -160,6 +165,13 @@ async function client(args, options = {}) {
 async function dev(args, options = {}) {
   const cwd = options.cwd || process.cwd();
   const report = runDev(cwd, args, { capture: Boolean(options.json) });
+  if (options.json) console.log(JSON.stringify(report, null, 2));
+  return report;
+}
+
+async function setup(args, options = {}) {
+  const cwd = options.cwd || process.cwd();
+  const report = runSetup(cwd, args, { ...options, capture: Boolean(options.json) });
   if (options.json) console.log(JSON.stringify(report, null, 2));
   return report;
 }
@@ -945,7 +957,7 @@ function initNextSteps({ cwd, localEnv, install = { skipped: true }, packageMana
   const cd = initCdStep(cwd);
   return [
     ...(cd ? [cd] : []),
-    ...(install.skipped ? [`${packageManager.name || "pnpm"} install`] : []),
+    ...(install.skipped ? ["nstack setup"] : []),
     ...(linked ? [] : ["nstack configure --domain <domain> --dokploy-url <url> --dokploy-api-key <key> --repository <git-url>"]),
     "nstack deploy",
   ];
@@ -1079,6 +1091,7 @@ Configure later:
   nstack configure --domain <host> --dokploy-url <url> --dokploy-api-key <key> --repository <git-url>
 
 Daily commands:
+  nstack setup                   install local tooling and project dependencies
   nstack dev                     run Encore, Nuxt, and client sync for local HMR
   nstack devexec '<js>'          run one-shot JS against a temporary dev stack
   nstack deploy                  build, deploy, verify, and print the URL
@@ -1124,6 +1137,8 @@ Configure:
   --server-id <id>               optional Dokploy deploy server/runner id
   --no-deploy                    skip the interactive init deploy wizard
   --skip-install                 skip init dependency install and pnpm build approvals
+  --skip-tools                   check tools without bootstrapping pnpm or Encore
+  --skip-docker                  skip local Docker daemon checks in setup/dev/check
 
 Deploy:
   --no-wait                      trigger deploy and return before verification/status

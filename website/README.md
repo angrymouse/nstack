@@ -1,4 +1,4 @@
-# __APP_NAME__
+# nstack
 
 Encore + Nuxt app deployed by `nstack`.
 
@@ -49,9 +49,12 @@ Point the domain at your Dokploy server. If this app was not linked during
 `nstack init`, run:
 
 ```sh
-nstack configure --domain <domain> --dokploy-url https://dokploy.example.com --dokploy-api-key <key> --repository https://github.com/acme/__APP_SLUG__.git
+nstack configure --dokploy-url https://dokploy.example.com --dokploy-api-key <key>
 nstack deploy
 ```
+
+The app domain is `nstack.playground.nik.technology`, and source deploys read
+`website/deploy/nstack/compose.dokploy.yaml` from this repository.
 
 After that, the usual loop is small:
 

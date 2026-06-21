@@ -58,6 +58,66 @@ exit 0
   assert.match(readFileSync(settingsFile, "utf8"), /"packageManager": "pnpm"/);
 });
 
+test("package manager prompt bootstraps pnpm through Corepack when possible", async () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "nstack-package-manager-corepack-"));
+  const fakeBin = path.join(cwd, "bin");
+  const log = path.join(cwd, "corepack.log");
+  mkdirSync(fakeBin, { recursive: true });
+  writeFileSync(path.join(fakeBin, "corepack"), `#!/usr/bin/env sh
+printf '%s\\n' "$*" >> "$NSTACK_FAKE_COREPACK_LOG"
+if [ "$1" = "--version" ]; then
+  printf '0.31.0\\n'
+  exit 0
+fi
+if [ "$1" = "enable" ]; then
+  exit 0
+fi
+if [ "$1" = "prepare" ]; then
+  printf '%s\\n' '#!/usr/bin/env sh' > "$NSTACK_FAKE_BIN/pnpm"
+  printf '%s\\n' 'if [ "$1" = "--version" ]; then printf "10.18.3\\n"; exit 0; fi' >> "$NSTACK_FAKE_BIN/pnpm"
+  printf '%s\\n' 'exit 0' >> "$NSTACK_FAKE_BIN/pnpm"
+  /bin/chmod +x "$NSTACK_FAKE_BIN/pnpm"
+  exit 0
+fi
+exit 1
+`);
+  chmodSync(path.join(fakeBin, "corepack"), 0o755);
+
+  const originalPath = process.env.PATH;
+  const originalLog = process.env.NSTACK_FAKE_COREPACK_LOG;
+  const originalBin = process.env.NSTACK_FAKE_BIN;
+  const originalPackageManager = process.env.NSTACK_PACKAGE_MANAGER;
+  const originalAutoInstall = process.env.NSTACK_AUTO_INSTALL_TOOLS;
+  delete process.env.NSTACK_PACKAGE_MANAGER;
+  delete process.env.NSTACK_AUTO_INSTALL_TOOLS;
+  process.env.PATH = `${fakeBin}:/usr/bin:/bin`;
+  process.env.NSTACK_FAKE_COREPACK_LOG = log;
+  process.env.NSTACK_FAKE_BIN = fakeBin;
+
+  try {
+    const selected = await promptPackageManager({ yes: true }, { file: path.join(cwd, "settings.json") });
+    assert.equal(selected.name, "pnpm");
+    assert.equal(selected.version, "10.18.3");
+  } finally {
+    if (originalPath === undefined) delete process.env.PATH;
+    else process.env.PATH = originalPath;
+    if (originalLog === undefined) delete process.env.NSTACK_FAKE_COREPACK_LOG;
+    else process.env.NSTACK_FAKE_COREPACK_LOG = originalLog;
+    if (originalBin === undefined) delete process.env.NSTACK_FAKE_BIN;
+    else process.env.NSTACK_FAKE_BIN = originalBin;
+    if (originalPackageManager === undefined) delete process.env.NSTACK_PACKAGE_MANAGER;
+    else process.env.NSTACK_PACKAGE_MANAGER = originalPackageManager;
+    if (originalAutoInstall === undefined) delete process.env.NSTACK_AUTO_INSTALL_TOOLS;
+    else process.env.NSTACK_AUTO_INSTALL_TOOLS = originalAutoInstall;
+  }
+
+  assert.deepEqual(readFileSync(log, "utf8").trim().split("\n"), [
+    "--version",
+    "enable",
+    "prepare pnpm@10.18.3 --activate",
+  ]);
+});
+
 test("package manager install commands approve pnpm builds", () => {
   assert.deepEqual(packageManagerInstallCommands("pnpm").map((command) => command.label), [
     "pnpm install --no-frozen-lockfile",
