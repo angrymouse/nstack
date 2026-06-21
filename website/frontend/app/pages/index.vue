@@ -23,7 +23,7 @@ async function copyInstall() {
       </a>
       <div class="nav-links">
         <a href="#install">Install</a>
-        <a href="#workflow">Workflow</a>
+        <a href="#workflow">Develop</a>
         <a href="#deploy">Deploy</a>
         <a :href="repoUrl">Source</a>
       </div>
@@ -33,8 +33,8 @@ async function copyInstall() {
       <div class="hero-copy">
         <h1>nstack</h1>
         <p class="lede">
-          Create an Encore + Nuxt app with typed frontend calls, local dev,
-          and Dokploy deploys. Encore Cloud is optional.
+          Create an Encore + Nuxt app with a generated frontend client and
+          Dokploy deployment.
         </p>
         <div class="hero-actions" aria-label="Primary actions">
           <a class="button button-primary" href="#install">Install</a>
@@ -53,7 +53,7 @@ async function copyInstall() {
 $ nstack init my-app
 $ cd my-app
 $ nstack setup
-$ nstack devexec "await apiJson('/status')"
+$ nstack dev
 $ nstack deploy</code></pre>
         </div>
       </aside>
@@ -70,24 +70,24 @@ $ nstack deploy</code></pre>
         </button>
       </div>
       <p class="note">
-        For a cloned generated app, run <code>nstack setup</code> before
-        <code>nstack dev</code> or <code>nstack deploy</code>.
+        Create an app with <code>nstack init my-app</code>.
       </p>
     </section>
 
-    <section id="workflow" class="workflow-grid" aria-label="nstack workflow">
+    <section id="workflow" class="workflow-grid" aria-label="nstack development workflow">
       <article>
-        <h3>Dev server</h3>
+        <h3>Local dev</h3>
         <p>
-          <code>nstack dev</code> starts Encore, Nuxt, and client sync. Agents
-          can use <code>nstack devexec</code> for one request and exit.
+          <code>nstack dev</code> starts Encore and Nuxt, then keeps the
+          generated client current. Use <code>nstack devexec</code> for
+          one-shot checks from Codex or Claude Code.
         </p>
       </article>
       <article>
-        <h3>Typed API calls</h3>
+        <h3>Generated client</h3>
         <p>
-          Nuxt calls Encore through a generated client, so route and parameter
-          changes show up in TypeScript.
+          Nuxt calls Encore through the generated client. API changes show up
+          in TypeScript.
         </p>
       </article>
       <article>
@@ -101,11 +101,11 @@ $ nstack deploy</code></pre>
 
     <section id="deploy" class="deploy-band">
       <div class="deploy-copy">
-        <h2>Deploy the current app.</h2>
+        <h2>Deploy with Dokploy</h2>
         <p>
-          Run <code>nstack deploy</code> from a generated app, or pass
-          <code>--cwd</code> for a monorepo subdirectory. Use targets for
-          staging and preview deploys.
+          <code>nstack deploy</code> deploys the app in the current directory.
+          In a monorepo, pass <code>--cwd apps/web</code>. Use
+          <code>--env staging</code> to deploy a staging target.
         </p>
       </div>
       <div class="deploy-panel" aria-label="Deploy commands">

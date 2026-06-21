@@ -10,7 +10,7 @@ Before changing code, read [NSTACK_GUIDELINES.md](./NSTACK_GUIDELINES.md).
 - `backend/`: Encore.ts services, APIs, resources, migrations, and secrets.
 - `frontend/`: Nuxt app served by the production Node server.
 - `nstack.config.mjs`: source-controlled app/deploy shape. Do not put secrets here.
-- `.nstack/`: local deploy target state and secrets. This directory is ignored.
+- `.nstack/`: local deploy target state, secrets, client cache, and temp files. This directory is ignored.
 - `deploy/nstack/`: generated deploy artifacts. Do not hand-edit these files.
 
 ## Commands
@@ -66,7 +66,27 @@ Before changing code, read [NSTACK_GUIDELINES.md](./NSTACK_GUIDELINES.md).
   run. Replace buzzphrases with concrete wording that names the real action.
 - Do not dress an obvious instruction up as product copy. Plain wording such as
   `Install nstack` is better than a sentence that tries to sound pragmatic but
-  adds no new information.
+  adds no new information. Avoid lines like `Install nstack, then set up each
+  app.` because they restate the workflow without adding the command or decision
+  the reader needs. Do not include installer internals such as linking the CLI
+  into `~/.local/bin` unless the reader is troubleshooting that specific
+  failure. Before keeping any prose, test each sentence on its own. Ask whether
+  it belongs on this page, whether it describes a common or recommended path,
+  whether the surrounding docs have introduced that context, and whether it
+  gives the reader a real next action, decision, or state. If a sentence such as
+  `For a cloned generated app, run nstack setup before nstack dev or nstack
+  deploy.` appears in an install section that does not recommend cloning
+  generated apps, delete it instead of polishing it. For long paragraphs, run
+  this check sentence by sentence even when it feels tedious; do not approve the
+  paragraph as a block. When you reject a sentence and write a replacement, run
+  the same check on the replacement. Keep iterating until the wording is just
+  right: on the tip, concrete, and juicy, with no filler. Avoid negative
+  capability copy unless the missing requirement is one of the best selling
+  points or removes a blocker the reader is likely to have. Phrases such as `No
+  Encore Cloud login is required`, `No sunglasses required`, or `No sofa
+  required` can be technically true and still give zero useful information. If
+  the reader is not already worried about that requirement, delete the line or
+  replace it with what they can do.
 - Use `nstack env set`, `nstack env pull`, and `nstack env push` for runtime
   secrets. Never commit secret values.
 - Keep generated deploy files and `.nstack/` state out of manual edits.

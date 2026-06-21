@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -27,6 +27,8 @@ test("client generation does not touch the Nuxt HMR input when output is unchang
 
   const env = { ...process.env, PATH: `${fakeBin}:${process.env.PATH || ""}` };
   const clientFile = path.join(app, "frontend", "app", "generated", "encore-client.ts");
+  const appTempRoot = path.join(app, ".nstack", "tmp");
+  const osTempBefore = osClientTempDirs();
   const runGen = () => execFileSync(process.execPath, ["scripts/nstack-client.mjs", "gen", "--force"], {
     cwd: app,
     env,
@@ -49,6 +51,15 @@ test("client generation does not touch the Nuxt HMR input when output is unchang
   const third = mtime();
   assert.ok(third > second);
   assert.match(readFileSync(clientFile, "utf8"), /value = "two"/);
+  assert.deepEqual(readDirNames(appTempRoot), []);
+  assert.deepEqual(osClientTempDirs(), osTempBefore);
+
+  const stale = path.join(appTempRoot, "client-stale");
+  mkdirSync(stale, { recursive: true });
+  const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  utimesSync(stale, old, old);
+  runGen();
+  assert.equal(existsSync(stale), false);
 });
 
 function writeFakeEncore(file) {
@@ -97,4 +108,14 @@ function writeFakeEncore(file) {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function readDirNames(dir) {
+  return existsSync(dir) ? readdirSync(dir).sort() : [];
+}
+
+function osClientTempDirs() {
+  return readdirSync(tmpdir())
+    .filter((name) => /^nstack-client(?:-check|-bench)?-/.test(name))
+    .sort();
 }

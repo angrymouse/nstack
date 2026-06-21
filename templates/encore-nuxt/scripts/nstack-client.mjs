@@ -13,7 +13,6 @@ import {
   writeFileSync,
 } from "node:fs";
 import os from "node:os";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
@@ -22,10 +21,14 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const backendDir = path.join(root, "backend");
 const clientFile = path.join(root, "frontend", "app", "generated", "encore-client.ts");
 const cacheFile = path.join(root, ".nstack", "client.json");
+const tempRoot = path.join(root, ".nstack", "tmp");
 const mode = process.argv[2] || "gen";
 const ignoredDirs = new Set(["node_modules", ".encore", "encore.gen", ".turbo", ".cache", "dist", "coverage"]);
 const watchedExtensions = new Set([".ts", ".tsx", ".js", ".mjs", ".json", ".sql"]);
 const postprocessVersion = "nstack-dokploy-env-v1";
+const activeTempDirs = new Set();
+let tempCleanupAt = 0;
+let tempSignalHandlersInstalled = false;
 
 if (mode === "gen") {
   process.exit(ensureClient({ force: process.argv.includes("--force") }));
@@ -51,7 +54,7 @@ function ensureClient(options = {}) {
   if (!options.force && options.output === undefined && cacheMatches(signature)) return 0;
 
   const started = performance.now();
-  const tempDir = mkdtempSync(path.join(tmpdir(), "nstack-client-"));
+  const tempDir = makeTempDir("client");
   const raw = path.join(tempDir, "raw-client.ts");
   try {
     const code = generateRawClient(raw, options);
@@ -69,7 +72,7 @@ function ensureClient(options = {}) {
     }
     return 0;
   } finally {
-    rmSync(tempDir, { recursive: true, force: true });
+    removeTempDir(tempDir);
   }
 }
 
@@ -139,7 +142,7 @@ function commandDetail(result) {
 }
 
 function checkClient() {
-  const tempDir = mkdtempSync(path.join(tmpdir(), "nstack-client-"));
+  const tempDir = makeTempDir("client-check");
   const generated = path.join(tempDir, "encore-client.ts");
   try {
     const code = ensureClient({ output: generated, quiet: true, force: true });
@@ -158,7 +161,7 @@ function checkClient() {
     }
     return 0;
   } finally {
-    rmSync(tempDir, { recursive: true, force: true });
+    removeTempDir(tempDir);
   }
 }
 
@@ -203,17 +206,92 @@ function benchmarkClient() {
   const runs = Number(process.env.NSTACK_CLIENT_BENCH_RUNS || 3);
   const times = [];
   for (let i = 0; i < runs; i += 1) {
-    const tempDir = mkdtempSync(path.join(tmpdir(), "nstack-client-bench-"));
+    const tempDir = makeTempDir("client-bench");
     const output = path.join(tempDir, "encore-client.ts");
     const started = performance.now();
-    const code = ensureClient({ output, quiet: true, force: true });
-    rmSync(tempDir, { recursive: true, force: true });
-    if (code !== 0) return code;
-    times.push(Math.round(performance.now() - started));
+    try {
+      const code = ensureClient({ output, quiet: true, force: true });
+      if (code !== 0) return code;
+      times.push(Math.round(performance.now() - started));
+    } finally {
+      removeTempDir(tempDir);
+    }
   }
   const average = Math.round(times.reduce((sum, value) => sum + value, 0) / times.length);
   console.log(JSON.stringify({ runs: times.length, timesMs: times, averageMs: average }, null, 2));
   return 0;
+}
+
+function makeTempDir(prefix) {
+  cleanupStaleTempDirs();
+  mkdirSync(tempRoot, { recursive: true });
+  const dir = mkdtempSync(path.join(tempRoot, `${prefix}-${process.pid}-`));
+  activeTempDirs.add(dir);
+  installTempCleanupHandlers();
+  return dir;
+}
+
+function removeTempDir(dir) {
+  activeTempDirs.delete(dir);
+  rmSync(dir, { recursive: true, force: true });
+}
+
+function cleanupStaleTempDirs() {
+  const now = Date.now();
+  if (now - tempCleanupAt < 60_000) return;
+  tempCleanupAt = now;
+  mkdirSync(tempRoot, { recursive: true });
+  const ttlMs = tempTtlMs();
+  for (const entry of readdirSync(tempRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !/^client(?:-check|-bench)?-/.test(entry.name)) continue;
+    const full = path.join(tempRoot, entry.name);
+    try {
+      const ownerPid = tempOwnerPid(entry.name);
+      const ownerExited = ownerPid > 0 && ownerPid !== process.pid && !processIsRunning(ownerPid);
+      if (ownerExited || now - statSync(full).mtimeMs >= ttlMs) {
+        rmSync(full, { recursive: true, force: true });
+      }
+    } catch {
+      // Another process may have removed the temp directory first.
+    }
+  }
+}
+
+function tempTtlMs() {
+  const value = Number(process.env.NSTACK_CLIENT_TEMP_TTL_MS || 60 * 60 * 1000);
+  return Number.isFinite(value) ? Math.max(60_000, value) : 60 * 60 * 1000;
+}
+
+function tempOwnerPid(name) {
+  const match = name.match(/^client(?:-check|-bench)?-(\d+)-/);
+  return match ? Number(match[1]) : 0;
+}
+
+function processIsRunning(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function installTempCleanupHandlers() {
+  if (tempSignalHandlersInstalled) return;
+  tempSignalHandlersInstalled = true;
+  process.once("exit", cleanupActiveTempDirs);
+  process.once("SIGINT", () => {
+    cleanupActiveTempDirs();
+    process.exit(130);
+  });
+  process.once("SIGTERM", () => {
+    cleanupActiveTempDirs();
+    process.exit(143);
+  });
+}
+
+function cleanupActiveTempDirs() {
+  for (const dir of [...activeTempDirs]) removeTempDir(dir);
 }
 
 function snapshotBackend() {

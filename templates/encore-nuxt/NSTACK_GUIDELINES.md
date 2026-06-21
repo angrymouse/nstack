@@ -65,6 +65,9 @@ is not triggered by backend edits that leave the API surface unchanged.
 `nstack client gen` only when you explicitly want to regenerate the client
 outside the normal workflow. Generation and deploy metadata use local Encore
 commands for Dokploy/nstack targets; Encore Cloud login is not required.
+Client generation uses ignored temp files under `.nstack/tmp` and removes them
+after each run. On startup, it prunes stale client temp files from interrupted
+runs.
 
 `backend/encore.app` intentionally leaves the Encore app id empty. That keeps
 local `encore run` and `encore check` in Encore's local-only mode so they do not

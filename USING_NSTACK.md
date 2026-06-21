@@ -48,7 +48,7 @@ https://github.com/acme/my-app.git
 
 Use a host name for `--domain`, not a URL with `https://`.
 
-### 1. Install And Check Local Tools
+### 1. Install nstack
 
 You need Node 22 or newer. Install the nstack CLI with the curl installer:
 
@@ -56,21 +56,11 @@ You need Node 22 or newer. Install the nstack CLI with the curl installer:
 curl -fsSL https://nstack.playground.nik.technology/install.sh | bash
 ```
 
-The installer creates a user-owned checkout under `~/.nstack`, activates pnpm
-with Corepack when needed, installs dependencies, and links `nstack` into
-`~/.local/bin`. If that directory is not on `PATH`, add it before continuing.
-
-Check the tools:
+Check the CLI:
 
 ```sh
-node --version
 nstack --version
 ```
-
-Generated apps also provide `nstack setup`, which installs project
-dependencies, bootstraps pnpm through Corepack when needed, installs the Encore
-CLI with the official installer when it is missing, and checks Docker only when
-declared resources need it.
 
 ### 2. Prepare The Server
 
@@ -233,7 +223,7 @@ Interactive `nstack init` asks whether to set up Dokploy deployment now. If you 
 
 Init asks which package manager to use, with pnpm as the default when it is available. The Encore + Nuxt template currently supports pnpm. You can let nstack remember pnpm as the default for future projects, or pass `--package-manager pnpm` / set `NSTACK_PACKAGE_MANAGER=pnpm` in automation.
 
-Init also runs `pnpm install` and `pnpm approve-builds --all`, initializes git when needed, creates the first commit with message `init`, and sets `origin` to the configured repository URL when one is known. If you run init inside an existing worktree, nstack does not create a nested repo; it commits only the generated app directory into the parent worktree. If you add the repository later with `nstack configure --repository <git-url>`, nstack sets `origin` when the repo does not already have one. On cloned or manually copied apps, `nstack setup` performs the local setup work without scaffolding a new app.
+Init also runs `pnpm install` and `pnpm approve-builds --all`, initializes git when needed, creates the first commit with message `init`, and sets `origin` to the configured repository URL when one is known. If you run init inside an existing worktree, nstack does not create a nested repo; it commits only the generated app directory into the parent worktree. If you add the repository later with `nstack configure --repository <git-url>`, nstack sets `origin` when the repo does not already have one.
 
 For automation or a scaffold-only run, use:
 

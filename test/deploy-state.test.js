@@ -1440,7 +1440,8 @@ export const apiSecret = secret("API_SECRET");
 
 test("deploy configures Gitea source-backed Compose apps for push deployments", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "nstack-source-push-"));
-  const remote = path.join(tmpdir(), `nstack-source-push-${Date.now()}.git`);
+  const remoteRoot = mkdtempSync(path.join(tmpdir(), "nstack-source-push-remote-"));
+  const remote = path.join(remoteRoot, "repo.git");
   mkdirSync(path.join(cwd, "backend", "api"), { recursive: true });
   mkdirSync(path.join(cwd, "frontend"), { recursive: true });
   writeFileSync(path.join(cwd, "nstack.config.mjs"), `export default {
