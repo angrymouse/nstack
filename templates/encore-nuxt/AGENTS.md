@@ -37,7 +37,8 @@ Before changing code, read [NSTACK_GUIDELINES.md](./NSTACK_GUIDELINES.md).
   in sync using local Encore metadata; Encore Cloud login is not required.
 - Keep `scripts/nstack-local.mjs` in the local dev/check path so fresh clones
   install missing pnpm dependencies and fail early with clear Encore CLI or
-  Docker setup instructions.
+  Docker setup instructions. `nstack dev` prints an extra reminder when it
+  detects an AI coding harness because the command is long-running.
 - Keep backend resource declarations in Encore source. Let `nstack deploy`
   reconcile Dokploy from Encore metadata.
 - If multiple local deploy targets exist, interactive `nstack deploy` asks for

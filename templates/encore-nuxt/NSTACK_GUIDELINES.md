@@ -57,6 +57,11 @@ regenerate the client outside the normal workflow. Generation and deploy
 metadata use local Encore commands for Dokploy/nstack targets; Encore Cloud
 login is not required.
 
+When `nstack dev` detects an AI coding harness such as Codex, Claude Code, or a
+custom `NSTACK_AGENT_HARNESS=<name>` value, it prints a short reminder that the
+command starts long-running dev servers. Set `NSTACK_DEV_HARNESS_NOTICE=0` to
+silence the reminder.
+
 ## Backups
 
 Use `nstack backup` before risky infrastructure changes. Backups are written to

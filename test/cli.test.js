@@ -178,14 +178,17 @@ writeFileSync("dev-ran.txt", "ok");
   try {
     console.log = (value = "") => output.push(String(value));
     const report = await runCli(["--cwd", cwd, "dev", "--json"]);
-    assert.deepEqual(report, { script: "scripts/dev.mjs" });
+    assert.equal(report.script, "scripts/dev.mjs");
+    assert.equal(typeof report.harness.detected, "boolean");
   } finally {
     console.log = originalLog;
   }
 
   assert.equal(existsSync(path.join(cwd, "dev-ran.txt")), true);
   assert.equal(readFileSync(path.join(cwd, "dev-ran.txt"), "utf8"), "ok");
-  assert.deepEqual(JSON.parse(output.join("\n")), { script: "scripts/dev.mjs" });
+  const json = JSON.parse(output.join("\n"));
+  assert.equal(json.script, "scripts/dev.mjs");
+  assert.equal(typeof json.harness.detected, "boolean");
 });
 
 test("cli accepts --help and -h after commands", async () => {

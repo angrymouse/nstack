@@ -28,6 +28,11 @@ triggered by backend edits that leave the API surface unchanged. `pnpm check`,
 and deploy metadata use local Encore commands for Dokploy/nstack targets;
 Encore Cloud login is not required.
 
+When `nstack dev` detects an AI coding harness such as Codex, Claude Code, or a
+custom `NSTACK_AGENT_HARNESS=<name>` value, it prints a short reminder that the
+command starts long-running dev servers. Set `NSTACK_DEV_HARNESS_NOTICE=0` to
+silence the reminder.
+
 ## Deploy
 
 Point the domain at your Dokploy server. If this app was not linked during

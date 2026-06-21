@@ -71,6 +71,11 @@ when you explicitly want to regenerate it. Client generation and deploy metadata
 use local Encore commands for Dokploy/nstack targets; Encore Cloud login is not
 required.
 
+When `nstack dev` detects an AI coding harness such as Codex or Claude Code, it
+prints a short reminder that the command is long-running. Set
+`NSTACK_AGENT_HARNESS=<name>` for custom harnesses, or
+`NSTACK_DEV_HARNESS_NOTICE=0` to silence the notice.
+
 `nstack cleanup` uses Dokploy cleanup endpoints for stopped containers, unused
 images, unused volumes, and Docker builder cache.
 

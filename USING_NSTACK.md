@@ -257,6 +257,11 @@ want to regenerate the client outside the normal workflow. The generator and
 deployment resource discovery use local Encore metadata for Dokploy/nstack
 targets; Encore Cloud login is not required.
 
+When `nstack dev` detects an AI coding harness such as Codex, Claude Code, or a
+custom `NSTACK_AGENT_HARNESS=<name>` value, it prints a short reminder that the
+command starts long-running dev servers. Set `NSTACK_DEV_HARNESS_NOTICE=0` to
+silence the reminder.
+
 ### 9. Push The Initial Source
 
 Compose mode builds from Git on the Dokploy server. `nstack init` creates the initial `init` commit, so push that commit before a remote production deploy can build it.
