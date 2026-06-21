@@ -44,6 +44,16 @@ matching Dokploy resource. If cleanup is declined, the ignore is recorded in
 
 For source-backed/git deploys, destructive resource cleanup is skipped.
 
+## Frontend Design
+
+Typography is a first-order design choice for Nuxt screens. Choose a designer
+typeface that fits the app's subject, audience, and interface density instead
+of defaulting to Inter, Geist, or the system stack. Fit matters more than
+novelty; a good designer font can look plain, quiet, and practical. Consider
+typefaces such as Excon, Satoshi, Newsreader, Hanken Grotesk, Bricolage
+Grotesque, Absans, or another suitable family. Tune weights, line height,
+spacing, and mobile rendering before treating the screen as done.
+
 ## Frontend API Client
 
 The Nuxt app uses the generated Encore TypeScript client at

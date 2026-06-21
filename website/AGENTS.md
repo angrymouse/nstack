@@ -32,6 +32,15 @@ Before changing code, read [NSTACK_GUIDELINES.md](./NSTACK_GUIDELINES.md).
   existing patterns when they remain healthy, but do not preserve old
   conventions that add unnecessary layering or turn the app into
   enterprise-style legacy code.
+- Treat typography as a core frontend design decision from the first layout
+  pass. Choose a real design typeface that fits the product, audience, and
+  mood. Favor fit over novelty; a strong design font can look plain, quiet, and
+  work-focused. Do not default to standard choices such as Inter, Geist, or the
+  system stack when the screen needs a more considered type voice. Consider
+  typefaces such as Excon, Satoshi, Newsreader, Hanken Grotesk, Bricolage
+  Grotesque, Absans, or another family that fits the subject. Pair display and
+  body fonts deliberately, tune weights, spacing, and line height, and verify
+  the result on mobile and desktop.
 - Use `apiClient()` from `frontend/app/utils/api.ts` for frontend calls to
   Encore APIs. Normal `pnpm dev`/`nstack dev`, `pnpm check`, `pnpm build`, and
   `nstack deploy` commands keep `frontend/app/generated/encore-client.ts`

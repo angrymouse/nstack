@@ -83,6 +83,15 @@ Before changing code, read [NSTACK_GUIDELINES.md](./NSTACK_GUIDELINES.md).
   `No sunglasses required`, or `No sofa required` can be technically true and
   still give zero useful information. If the reader is not already worried about
   that requirement, delete the line or replace it with what they can do.
+- Treat typography as a core frontend design decision from the first layout
+  pass. Choose a real design typeface that fits the product, audience, and
+  mood. Favor fit over novelty; a strong design font can look plain, quiet, and
+  work-focused. Do not default to standard choices such as Inter, Geist, or the
+  system stack when the screen needs a more considered type voice. Consider
+  typefaces such as Excon, Satoshi, Newsreader, Hanken Grotesk, Bricolage
+  Grotesque, Absans, or another family that fits the subject. Pair display and
+  body fonts deliberately, tune weights, spacing, and line height, and verify
+  the result on mobile and desktop.
 - For new features, prefer idiomatic Encore and Nuxt abstractions over legacy
   local conventions: Encore APIs and generated clients, SQL databases, caches,
   Pub/Sub topics, WebSockets, and other Encore resources where they fit. Follow
