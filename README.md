@@ -39,6 +39,7 @@ path that gives Dokploy native push webhooks.
 
 ```sh
 pnpm dev        # or: nstack dev
+nstack devexec 'await apiJson("/status")'
 pnpm check
 nstack deploy
 nstack status
@@ -72,9 +73,10 @@ use local Encore commands for Dokploy/nstack targets; Encore Cloud login is not
 required.
 
 When `nstack dev` detects an AI coding harness such as Codex or Claude Code, it
-prints a short reminder that the command is long-running. Set
-`NSTACK_AGENT_HARNESS=<name>` for custom harnesses, or
-`NSTACK_DEV_HARNESS_NOTICE=0` to silence the notice.
+refuses to start a long-running dev server by default. Agents should use
+`nstack devexec '<js>'` for one-shot checks against a temporary dev stack. Set
+`NSTACK_AGENT_HARNESS=<name>` for custom harnesses, or `AI_ALLOW_DEVSERVER=1`
+when an agent truly needs an interactive dev server.
 
 `nstack cleanup` uses Dokploy cleanup endpoints for stopped containers, unused
 images, unused volumes, and Docker builder cache.

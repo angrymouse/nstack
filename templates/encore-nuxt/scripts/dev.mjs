@@ -1,6 +1,13 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from "node:child_process";
-import { agentHarnessNotice, detectAgentHarness, ensureLocalReady, root, shell } from "./nstack-local.mjs";
+import {
+  aiDevServerAllowed,
+  detectAgentHarness,
+  devServerGuardMessage,
+  ensureLocalReady,
+  root,
+  shell,
+} from "./nstack-local.mjs";
 
 const children = [];
 
@@ -12,7 +19,7 @@ process.on("SIGTERM", () => shutdown("SIGTERM"));
 start();
 
 async function start() {
-  printHarnessNotice();
+  enforceHarnessGuard();
   await ensureLocalReady();
   spawnManaged("backend", "pnpm", ["--dir", "backend", "dev"]);
 
@@ -31,10 +38,11 @@ async function start() {
   spawnManaged("frontend", "pnpm", ["--dir", "frontend", "dev"]);
 }
 
-function printHarnessNotice() {
-  if (process.env.NSTACK_DEV_HARNESS_NOTICE === "0") return;
-  const notice = agentHarnessNotice(detectAgentHarness());
-  if (notice) console.error(notice);
+function enforceHarnessGuard() {
+  const harness = detectAgentHarness();
+  if (!harness.detected || aiDevServerAllowed()) return;
+  console.error(devServerGuardMessage(harness));
+  process.exit(1);
 }
 
 function spawnManaged(name, command, args) {

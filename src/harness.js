@@ -63,9 +63,20 @@ export function detectAgentHarness(env = process.env) {
 
 export function agentHarnessNotice(harness = detectAgentHarness()) {
   if (!harness.detected) return "";
+  return devServerGuardMessage(harness);
+}
+
+export function aiDevServerAllowed(env = process.env) {
+  return String(env.AI_ALLOW_DEVSERVER || "").trim() === "1";
+}
+
+export function devServerGuardMessage(harness = detectAgentHarness()) {
+  if (!harness.detected) return "";
   return [
     `nstack dev detected ${harness.label}.`,
-    "This command starts long-running dev servers; agents should run it in a managed background terminal, or use `pnpm check` for one-shot validation.",
+    "For AI harnesses, starting a long-running dev server just to inspect state and then issue requests is a bad idea.",
+    "Use `nstack devexec '<js>'` for one-shot checks; it starts the dev stack, runs your JavaScript, then shuts it down.",
+    "If you truly need an interactive dev server, set AI_ALLOW_DEVSERVER=1 and rerun `nstack dev`.",
   ].join(" ");
 }
 

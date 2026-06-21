@@ -45,6 +45,7 @@ test("detectAgentHarness supports explicit override and disable", () => {
 test("agentHarnessNotice explains long-running dev behavior", () => {
   const notice = agentHarnessNotice(detectAgentHarness({ CODEX_CI: "1" }));
   assert.match(notice, /Codex/);
-  assert.match(notice, /long-running dev servers/);
-  assert.match(notice, /pnpm check/);
+  assert.match(notice, /long-running dev server/);
+  assert.match(notice, /nstack devexec/);
+  assert.match(notice, /AI_ALLOW_DEVSERVER=1/);
 });

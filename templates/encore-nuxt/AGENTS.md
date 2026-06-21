@@ -17,6 +17,7 @@ Before changing code, read [NSTACK_GUIDELINES.md](./NSTACK_GUIDELINES.md).
 
 - Install: `pnpm install`
 - Develop: `pnpm dev` or `nstack dev`
+- One-shot dev check: `nstack devexec '<js>'`
 - Check: `pnpm check`
 - Deploy: `nstack deploy`
 - Status: `nstack status`
@@ -37,8 +38,9 @@ Before changing code, read [NSTACK_GUIDELINES.md](./NSTACK_GUIDELINES.md).
   in sync using local Encore metadata; Encore Cloud login is not required.
 - Keep `scripts/nstack-local.mjs` in the local dev/check path so fresh clones
   install missing pnpm dependencies and fail early with clear Encore CLI or
-  Docker setup instructions. `nstack dev` prints an extra reminder when it
-  detects an AI coding harness because the command is long-running.
+  Docker setup instructions. Under AI coding harnesses, use `nstack devexec
+  '<js>'` for one-shot dev-server checks. `nstack dev` is blocked unless
+  `AI_ALLOW_DEVSERVER=1` is set because it starts long-running servers.
 - Keep backend resource declarations in Encore source. Let `nstack deploy`
   reconcile Dokploy from Encore metadata.
 - If multiple local deploy targets exist, interactive `nstack deploy` asks for

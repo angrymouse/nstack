@@ -6,7 +6,7 @@ import { runClientGenerator } from "./client.js";
 import { cleanup } from "./cleanup.js";
 import { configure, deploy, redeploy, rollback, verify, waitForDeployment } from "./deploy.js";
 import { cancelDeployment, inspectDeployment, listDeployments, logs } from "./deployments.js";
-import { runDev } from "./dev.js";
+import { runDev, runDevExec } from "./dev.js";
 import { promptDokployInstance } from "./dokploy-instances.js";
 import { Prompter } from "./prompt.js";
 import { DokployClient, loadDokploySourceProviders } from "./providers/dokploy.js";
@@ -103,6 +103,13 @@ const valueOptions = new Set([
   "backupDestinationId",
   "backupTimeoutMs",
   "backupIntervalMs",
+  "code",
+  "file",
+  "baseUrl",
+  "frontendUrl",
+  "backendUrl",
+  "apiUrl",
+  "waitUrl",
 ]);
 
 export async function runCli(argv) {
@@ -125,6 +132,7 @@ export async function runCli(argv) {
   if (command === "undeploy" || command === "destroy") return undeploy(options);
   if (command === "open") return openTarget(args, options);
   if (command === "dev") return dev(args, options);
+  if (command === "devexec" || command === "dev-exec") return devexec(args, options);
   if (command === "client") return client(args, options);
   if (command === "env" || command === "secret" || command === "secrets") return runSecretCommand(args, options);
   if (command === "build") return deploy({ ...options, buildOnly: true, skipVerify: true, skipStatus: true });
@@ -152,6 +160,23 @@ async function client(args, options = {}) {
 async function dev(args, options = {}) {
   const cwd = options.cwd || process.cwd();
   const report = runDev(cwd, args, { capture: Boolean(options.json) });
+  if (options.json) console.log(JSON.stringify(report, null, 2));
+  return report;
+}
+
+async function devexec(args, options = {}) {
+  const cwd = options.cwd || process.cwd();
+  const report = runDevExec(cwd, args, {
+    capture: false,
+    code: options.code,
+    file: options.file,
+    baseUrl: options.baseUrl,
+    frontendUrl: options.frontendUrl,
+    backendUrl: options.backendUrl,
+    apiUrl: options.apiUrl,
+    waitUrl: options.waitUrl,
+    timeoutMs: options.timeoutMs,
+  });
   if (options.json) console.log(JSON.stringify(report, null, 2));
   return report;
 }
@@ -1055,6 +1080,7 @@ Configure later:
 
 Daily commands:
   nstack dev                     run Encore, Nuxt, and client sync for local HMR
+  nstack devexec '<js>'          run one-shot JS against a temporary dev stack
   nstack deploy                  build, deploy, verify, and print the URL
   nstack status                  show the current release and Dokploy state
   nstack env set <name>          save an app runtime secret locally

@@ -175,19 +175,92 @@ writeFileSync("dev-ran.txt", "ok");
 
   const output = [];
   const originalLog = console.log;
+  const originalAllow = process.env.AI_ALLOW_DEVSERVER;
   try {
+    process.env.AI_ALLOW_DEVSERVER = "1";
     console.log = (value = "") => output.push(String(value));
     const report = await runCli(["--cwd", cwd, "dev", "--json"]);
     assert.equal(report.script, "scripts/dev.mjs");
     assert.equal(typeof report.harness.detected, "boolean");
   } finally {
     console.log = originalLog;
+    if (originalAllow === undefined) delete process.env.AI_ALLOW_DEVSERVER;
+    else process.env.AI_ALLOW_DEVSERVER = originalAllow;
   }
 
   assert.equal(existsSync(path.join(cwd, "dev-ran.txt")), true);
   assert.equal(readFileSync(path.join(cwd, "dev-ran.txt"), "utf8"), "ok");
   const json = JSON.parse(output.join("\n"));
   assert.equal(json.script, "scripts/dev.mjs");
+  assert.equal(typeof json.harness.detected, "boolean");
+});
+
+test("cli blocks nstack dev under AI harnesses unless explicitly allowed", async () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "nstack-dev-ai-block-"));
+  mkdirSync(path.join(cwd, "scripts"), { recursive: true });
+  writeFileSync(path.join(cwd, "scripts", "dev.mjs"), `
+import { writeFileSync } from "node:fs";
+writeFileSync("dev-ran.txt", "bad");
+`);
+
+  const envKeys = ["NSTACK_AGENT_HARNESS", "AI_ALLOW_DEVSERVER"];
+  const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+  try {
+    process.env.NSTACK_AGENT_HARNESS = "codex";
+    delete process.env.AI_ALLOW_DEVSERVER;
+    await assert.rejects(
+      () => runCli(["--cwd", cwd, "dev"]),
+      /Use `nstack devexec '<js>'`/,
+    );
+  } finally {
+    for (const key of envKeys) {
+      if (originalEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = originalEnv[key];
+    }
+  }
+
+  assert.equal(existsSync(path.join(cwd, "dev-ran.txt")), false);
+});
+
+test("cli runs the generated app devexec runner", async () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "nstack-devexec-cli-"));
+  mkdirSync(path.join(cwd, "scripts"), { recursive: true });
+  writeFileSync(path.join(cwd, "scripts", "devexec.mjs"), `
+import { writeFileSync } from "node:fs";
+writeFileSync("devexec-ran.txt", process.argv.slice(2).join("\\n"));
+`);
+
+  const output = [];
+  const originalLog = console.log;
+  try {
+    console.log = (value = "") => output.push(String(value));
+    const report = await runCli([
+      "--cwd", cwd,
+      "devexec",
+      "--code", "await apiJson('/status')",
+      "--frontend-url", "http://127.0.0.1:3100",
+      "--backend-url", "http://127.0.0.1:4100",
+      "--timeout-ms", "1234",
+      "--json",
+    ]);
+    assert.equal(report.script, "scripts/devexec.mjs");
+    assert.equal(typeof report.harness.detected, "boolean");
+  } finally {
+    console.log = originalLog;
+  }
+
+  assert.equal(readFileSync(path.join(cwd, "devexec-ran.txt"), "utf8"), [
+    "--code",
+    "await apiJson('/status')",
+    "--frontend-url",
+    "http://127.0.0.1:3100",
+    "--backend-url",
+    "http://127.0.0.1:4100",
+    "--timeout-ms",
+    "1234",
+  ].join("\n"));
+  const json = JSON.parse(output.join("\n"));
+  assert.equal(json.script, "scripts/devexec.mjs");
   assert.equal(typeof json.harness.detected, "boolean");
 });
 

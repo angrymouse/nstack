@@ -258,9 +258,17 @@ deployment resource discovery use local Encore metadata for Dokploy/nstack
 targets; Encore Cloud login is not required.
 
 When `nstack dev` detects an AI coding harness such as Codex, Claude Code, or a
-custom `NSTACK_AGENT_HARNESS=<name>` value, it prints a short reminder that the
-command starts long-running dev servers. Set `NSTACK_DEV_HARNESS_NOTICE=0` to
-silence the reminder.
+custom `NSTACK_AGENT_HARNESS=<name>` value, it refuses to start a long-running
+dev server by default. Agents should use `nstack devexec '<js>'` for one-shot
+checks against a temporary dev stack. Set `AI_ALLOW_DEVSERVER=1` only when an
+agent truly needs an interactive dev server.
+
+For example:
+
+```sh
+nstack devexec 'await apiJson("/status")'
+nstack devexec 'return await pageText("/")'
+```
 
 ### 9. Push The Initial Source
 
@@ -980,6 +988,7 @@ Planning, build, deploy:
 
 ```sh
 nstack dev
+nstack devexec 'await apiJson("/status")'
 nstack render
 nstack plan
 nstack build
