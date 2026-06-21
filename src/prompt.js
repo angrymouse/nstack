@@ -85,6 +85,7 @@ export class Prompter {
   async askSecret(message, { required = true } = {}) {
     const answer = this.handleCancel(await password({
       message,
+      mask: "*",
       validate(value) {
         if (required && !String(value || "").trim()) return `${message} is required.`;
         return undefined;

@@ -52,6 +52,7 @@ deploy is running.
 ```sh
 nstack doctor
 nstack pull
+nstack backup
 nstack rollback
 nstack undeploy --yes
 nstack cleanup
@@ -64,6 +65,21 @@ start with a wall of commands.
 
 `nstack cleanup` uses Dokploy cleanup endpoints for stopped containers, unused
 images, unused volumes, and Docker builder cache.
+
+`nstack backup` writes local snapshots under
+`.nstack/backups/<target>/<year-month-day-hour-minute-second-utc>/`. It stores
+Dokploy/app metadata plus data artifacts for stateful resources:
+Postgres dumps and Dokploy volume tars for Redis-compatible cache, RustFS object
+storage, and NSQ Pub/Sub data. Snapshot files preserve secrets for recovery, so
+keep `.nstack/backups` private.
+
+Destructive deletion paths create a critical local backup first and refuse to
+continue if the backup cannot be completed. To intentionally delete without that
+guard, start the CLI with `NSTACK_NO_BACKUPS_ON_DELETION=1`. Data backups use
+Dokploy API-backed backup jobs and require a Dokploy backup destination; pass
+`--backup-destination-id <id>` or set `NSTACK_BACKUP_DESTINATION_ID` when more
+than one destination exists. If none exists, nstack aborts before destructive
+deletion.
 
 For the detailed operator guide, see [USING_NSTACK.md](USING_NSTACK.md).
 

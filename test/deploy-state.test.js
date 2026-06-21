@@ -809,12 +809,13 @@ process.exit(0);
     },
   }, null, 2)}\n`);
 
-  const envKeys = ["NSTACK_DOMAIN", "NSTACK_REGISTRY", "DOKPLOY_URL", "DOKPLOY_API_KEY", "PATH"];
+  const envKeys = ["NSTACK_DOMAIN", "NSTACK_REGISTRY", "DOKPLOY_URL", "DOKPLOY_API_KEY", "NSTACK_NO_BACKUPS_ON_DELETION", "PATH"];
   const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
   process.env.NSTACK_DOMAIN = "prune-resources.example.test";
   process.env.NSTACK_REGISTRY = "ghcr.io/acme/prune-resources";
   process.env.DOKPLOY_URL = "https://dokploy.example.test";
   process.env.DOKPLOY_API_KEY = "dummy";
+  process.env.NSTACK_NO_BACKUPS_ON_DELETION = "1";
   process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH || ""}`;
 
   const calls = [];

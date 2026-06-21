@@ -1,5 +1,7 @@
 import path from "node:path";
+import { symlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { backup } from "./backup.js";
 import { cleanup } from "./cleanup.js";
 import { configure, deploy, redeploy, rollback, verify, waitForDeployment } from "./deploy.js";
 import { cancelDeployment, inspectDeployment, listDeployments, logs } from "./deployments.js";
@@ -52,6 +54,7 @@ const booleanOptions = new Set([
   "stage",
   "follow",
   "watch",
+  "metadataOnly",
 ]);
 const valueOptions = new Set([
   "cwd",
@@ -93,6 +96,10 @@ const valueOptions = new Set([
   "intervalMs",
   "to",
   "packageManager",
+  "output",
+  "backupDestinationId",
+  "backupTimeoutMs",
+  "backupIntervalMs",
 ]);
 
 export async function runCli(argv) {
@@ -105,6 +112,7 @@ export async function runCli(argv) {
   if (command === "unlink") return unlink(options);
   if (command === "targets" || command === "target" || command === "envs" || command === "environments") return listTargets(options);
   if (command === "pull") return pull(options);
+  if (command === "backup") return backup(options);
   if (command === "inspect") return inspectDeployment(args, options);
   if ((command === "deployment" || command === "deployments") && args[0] === "inspect") return inspectDeployment(args.slice(1), options);
   if (command === "deployments" || command === "deployment" || command === "releases" || command === "list") return listDeployments(options);
@@ -149,6 +157,7 @@ async function init(target, options) {
       APP_NAME: appName,
       APP_SLUG: slug,
     });
+    ensureClaudeSymlink(cwd);
     if (Object.keys(localEnv).length > 0) {
       mergeEnvFile(path.join(cwd, localEnvPathForTarget(localEnv.NSTACK_TARGET || "prod")), localEnv);
     }
@@ -213,6 +222,12 @@ function ensureInitialGitCommit(cwd, localEnv = {}) {
     capture: true,
     env: gitCommitEnv(),
   });
+}
+
+function ensureClaudeSymlink(cwd) {
+  const target = path.join(cwd, "CLAUDE.md");
+  if (fileExists(target)) return;
+  symlinkSync("AGENTS.md", target);
 }
 
 function gitCommitEnv() {
@@ -1025,6 +1040,7 @@ Daily commands:
 When needed:
   nstack doctor                  explain missing local setup
   nstack pull                    recover local state from Dokploy
+  nstack backup                  snapshot Dokploy config and local data dumps
   nstack rollback [tag|commit]   deploy a previous verified release
   nstack undeploy                delete this app's Dokploy resources
   nstack cleanup                 prune stopped containers, images, volumes, and build cache
@@ -1035,6 +1051,9 @@ Options:
   --env <name>                   use a target such as staging
   --json                         print machine-readable output where supported
   --ci                           fail instead of prompting; alias for --yes
+  --output <dir>                 write backup output to a custom directory
+  --metadata-only                write backup snapshots without data artifacts
+  --backup-destination-id <id>   Dokploy backup destination used for local backups
 
 Configure:
   --domain <host>                public domain; DNS is assumed to point at Dokploy
@@ -1068,6 +1087,8 @@ Other useful flags:
   --check                        exit nonzero when doctor/status finds a problem
   --version, -v                  print nstack version
   --yes                          fail instead of prompting for missing values
+  NSTACK_BACKUP_DESTINATION_ID   Dokploy backup destination used for local backups
+  NSTACK_NO_BACKUPS_ON_DELETION  allow destructive deletion without local backups
 `);
 }
 

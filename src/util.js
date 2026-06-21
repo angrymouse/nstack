@@ -138,7 +138,7 @@ export function formatDotEnv(env) {
 
 function quoteEnv(value) {
   const text = String(value ?? "");
-  if (/^[A-Za-z0-9_./:@-]*$/.test(text)) return text;
+  if (/^[A-Za-z0-9_./:@*-]*$/.test(text)) return text;
   return JSON.stringify(text);
 }
 

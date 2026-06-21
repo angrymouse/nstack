@@ -1,6 +1,7 @@
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { buildBackendImage } from "./backend-build.js";
+import { backupBeforeDeletion, deletionBackupDisabled, deletionBackupEnvName } from "./backup.js";
 import { composeEnvironmentValues, renderComposeEnvironment } from "./compose-env.js";
 import {
   loadConfig,
@@ -367,10 +368,20 @@ function clearDokployResourceState(dokploy) {
 
 async function pruneRemovedDokployResources({ provider, environmentId, resources, state, infra, config, resourceCleanup }) {
   if (resourceCleanup.skipAll) return;
+  let previousCompose = null;
+  const getPreviousCompose = async () => {
+    if (previousCompose !== null) return previousCompose;
+    const composeId = state.dokploy?.composeId || await provider.resolveComposeId(environmentId);
+    previousCompose = composeId
+      ? await provider.client.apiGet("compose.one", { composeId }).catch(() => false)
+      : false;
+    return previousCompose;
+  };
   if (resources.databases.length === 0) {
     const postgresId = await provider.resolvePostgresId(environmentId);
     const resource = { type: "db", name: `${config.app.slug}-postgres`, id: postgresId };
     if (postgresId && await resourceCleanup.shouldRemove(resource)) {
+      await resourceCleanup.beforeRemove(resource);
       await provider.removePostgres(postgresId);
       delete state.dokploy.postgresId;
       deleteInfraSection(state, infra, "postgres");
@@ -380,13 +391,27 @@ async function pruneRemovedDokployResources({ provider, environmentId, resources
     const redisId = await provider.resolveRedisId(environmentId);
     const resource = { type: "cache", name: `${config.app.slug}-redis`, id: redisId };
     if (redisId && await resourceCleanup.shouldRemove(resource)) {
+      await resourceCleanup.beforeRemove(resource);
       await provider.removeRedis(redisId);
       delete state.dokploy.redisId;
       deleteInfraSection(state, infra, "redis");
     }
   }
   if (resources.buckets.length === 0) {
-    deleteInfraSection(state, infra, "objectStorage");
+    const previousObjectStorage = Boolean(state.infra?.objectStorage) ||
+      composeHasServiceOrVolume(await getPreviousCompose(), "rustfs", "rustfs_data");
+    const resource = { type: "object-storage", name: `${config.app.slug}-object-storage`, id: state.dokploy?.composeId || "" };
+    if (previousObjectStorage && await resourceCleanup.shouldRemove(resource)) {
+      await resourceCleanup.beforeRemove(resource);
+      deleteInfraSection(state, infra, "objectStorage");
+    }
+  }
+  if (resources.topics.length === 0) {
+    const previousPubsub = composeHasServiceOrVolume(await getPreviousCompose(), "nsqd", "nsq_data");
+    const resource = { type: "pubsub", name: `${config.app.slug}-pubsub`, id: state.dokploy?.composeId || "" };
+    if (previousPubsub && await resourceCleanup.shouldRemove(resource)) {
+      await resourceCleanup.beforeRemove(resource);
+    }
   }
 }
 
@@ -400,8 +425,23 @@ function deleteInfraSection(state, infra, key) {
 function createResourceCleanupDecider({ cwd, config, options }) {
   const skipAll = isSourceBackedCompose(config);
   const prompter = new Prompter({ yes: false });
+  let deletionBackup = null;
   return {
     skipAll,
+    async beforeRemove(resource) {
+      if (deletionBackupDisabled()) {
+        if (!options.json) console.warn(`Warning: ${deletionBackupEnvName()} is set; deleting ${resource.type} resource ${resource.name} without a local backup.`);
+        return null;
+      }
+      if (!deletionBackup) {
+        if (!options.json) {
+          console.warn(`Creating a local backup before deleting ${resource.type} resource ${resource.name}. Set ${deletionBackupEnvName()}=1 to delete without local backups.`);
+        }
+        deletionBackup = await backupBeforeDeletion({ ...options, cwd, target: config.deploy.target });
+        if (!options.json) console.log(`Local deletion backup: ${deletionBackup.backupDir} (${deletionBackup.size})`);
+      }
+      return deletionBackup;
+    },
     async shouldRemove(resource) {
       const normalized = cleanupResourceEntry(resource);
       if (!normalized || skipAll || isCleanupIgnored(config, normalized)) return false;
@@ -413,7 +453,7 @@ function createResourceCleanupDecider({ cwd, config, options }) {
 
       const accepted = await prompter.confirm(
         envName,
-        `Do you want to remove ${normalized.type} resource ${normalized.name}?`,
+        `Do you want to remove ${normalized.type} resource ${normalized.name}? nstack will create a local backup first and print its exact size. Set ${deletionBackupEnvName()}=1 to delete without local backups.`,
         { defaultValue: false },
       );
       if (!accepted) recordResourceCleanupIgnore(cwd, config, normalized);
@@ -427,6 +467,18 @@ function cleanupResourceEntry(resource) {
   const name = String(resource?.name || resource?.id || "").trim();
   if (!type || !name) return null;
   return { type: type.toLowerCase(), name };
+}
+
+function composeHasServiceOrVolume(compose, serviceName, volumeName) {
+  const text = String(compose?.composeFile || "");
+  if (!text) return false;
+  const servicePattern = new RegExp(`(^|\\n)\\s{2}${escapeRegExp(serviceName)}\\s*:`);
+  const volumePattern = new RegExp(`(^|\\n|[-\\s])${escapeRegExp(volumeName)}(?::|\\s*:|/)`);
+  return servicePattern.test(text) || volumePattern.test(text);
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function isCleanupIgnored(config, resource) {

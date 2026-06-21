@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -88,6 +88,12 @@ exit 1
   assert.deepEqual(readFileSync(pnpmLog, "utf8").trim().split("\n"), ["install --no-frozen-lockfile", "approve-builds --all"]);
   assert.equal(execFileSync("git", ["-C", target, "ls-tree", "-r", "--name-only", "HEAD", "pnpm-lock.yaml"], { encoding: "utf8" }).trim(), "pnpm-lock.yaml");
   assert.equal(execFileSync("git", ["-C", target, "ls-tree", "-r", "--name-only", "HEAD", "backend/.gitignore"], { encoding: "utf8" }).trim(), "backend/.gitignore");
+  assert.equal(execFileSync("git", ["-C", target, "ls-tree", "-r", "--name-only", "HEAD", "AGENTS.md"], { encoding: "utf8" }).trim(), "AGENTS.md");
+  assert.equal(execFileSync("git", ["-C", target, "ls-tree", "-r", "--name-only", "HEAD", "CLAUDE.md"], { encoding: "utf8" }).trim(), "CLAUDE.md");
+  assert.equal(execFileSync("git", ["-C", target, "ls-tree", "-r", "--name-only", "HEAD", "NSTACK_GUIDELINES.md"], { encoding: "utf8" }).trim(), "NSTACK_GUIDELINES.md");
+  assert.equal(lstatSync(path.join(target, "CLAUDE.md")).isSymbolicLink(), true);
+  assert.equal(readlinkSync(path.join(target, "CLAUDE.md")), "AGENTS.md");
+  assert.match(readFileSync(path.join(target, "AGENTS.md"), "utf8"), /NSTACK_GUIDELINES\.md/);
   assert.match(readFileSync(path.join(target, "pnpm-workspace.yaml"), "utf8"), /onlyBuiltDependencies:/);
 
   const gitignore = readFileSync(path.join(target, ".gitignore"), "utf8");
