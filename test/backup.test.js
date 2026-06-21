@@ -148,6 +148,8 @@ test("backup writes recoverable snapshots and downloads Dokploy data artifacts",
     assert.match(report.backupDir, /\.nstack\/backups\/prod\/\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}-utc$/);
     assert.equal(report.data.postgres.status, "ok");
     assert.equal(existsSync(path.join(report.backupDir, "postgres.sql.gz")), true);
+    assert.equal(existsSync(path.join(report.backupDir, "local.env")), false);
+    assert.equal(existsSync(path.join(report.backupDir, "secrets.env")), false);
     assert.equal(readFileSync(path.join(report.backupDir, "postgres.sql.gz"), "utf8"), "SQL");
 
     const target = readFileSync(path.join(report.backupDir, "nstack.target.json"), "utf8");

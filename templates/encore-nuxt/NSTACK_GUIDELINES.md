@@ -39,7 +39,8 @@ For source-backed/git deploys, destructive resource cleanup is skipped.
 
 Use `nstack backup` before risky infrastructure changes. Backups are written to
 `.nstack/backups/<target>/<year-month-day-hour-minute-second-utc>/` and include
-Dokploy/app snapshots plus local data artifacts for stateful resources:
+Dokploy/app snapshots, remote Dokploy Compose env values in `compose.env`, and
+local data artifacts for stateful resources:
 Postgres dumps and volume tars for Redis-compatible cache, RustFS object storage,
 and NSQ Pub/Sub data. Snapshot files preserve secrets for recovery, so keep
 `.nstack/backups` private.

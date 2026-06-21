@@ -68,7 +68,8 @@ images, unused volumes, and Docker builder cache.
 
 `nstack backup` writes local snapshots under
 `.nstack/backups/<target>/<year-month-day-hour-minute-second-utc>/`. It stores
-Dokploy/app metadata plus data artifacts for stateful resources:
+Dokploy/app metadata, remote Dokploy Compose env values in `compose.env`, and
+data artifacts for stateful resources:
 Postgres dumps and Dokploy volume tars for Redis-compatible cache, RustFS object
 storage, and NSQ Pub/Sub data. Snapshot files preserve secrets for recovery, so
 keep `.nstack/backups` private.
