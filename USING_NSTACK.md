@@ -16,6 +16,8 @@ The generated app stays ordinary:
 
 - `backend/` is an Encore TypeScript app.
 - `frontend/` is a Nuxt app.
+- `frontend/app/generated/encore-client.ts` is generated from exposed and
+  authenticated Encore APIs and consumed through `apiClient()`.
 - Dokploy Domains/Traefik route traffic; nstack does not add Caddy or a proxy container.
 - Dokploy Compose builds and runs backend and frontend containers.
 - Dokploy native resources are used where they map to Encore resources.
@@ -225,6 +227,7 @@ nstack init my-app --skip-install   # leave dependency install for later
 ```
 
 The generated app contains an Encore backend, a Nuxt frontend, production Dockerfiles for Dokploy Compose, and a minimal `nstack.config.mjs`.
+It also includes a generated Encore TypeScript client for the Nuxt frontend.
 
 ### 8. Run Local Checks
 
@@ -238,7 +241,21 @@ For local development:
 
 ```sh
 pnpm dev
+# or
+nstack dev
 ```
+
+`pnpm dev` and `nstack dev` run the same local orchestrator: Encore backend,
+generated client watcher, and Nuxt frontend. On a fresh clone, `pnpm dev` and
+`pnpm check` install missing pnpm dependencies before starting local work. They
+also fail early with direct setup instructions when the Encore CLI or Docker
+daemon is missing. The client watcher only rewrites the generated client when
+the output changes, so Nuxt HMR is not triggered by backend edits that leave the
+API surface unchanged. `pnpm check`, `pnpm build`, and `nstack deploy` also
+sync the client automatically. Use `nstack client gen` only when you explicitly
+want to regenerate the client outside the normal workflow. The generator and
+deployment resource discovery use local Encore metadata for Dokploy/nstack
+targets; Encore Cloud login is not required.
 
 ### 9. Push The Initial Source
 
@@ -416,6 +433,7 @@ Important files in a generated app:
 nstack.config.mjs              stable source config
 backend/                       Encore backend
 frontend/                      Nuxt frontend
+frontend/app/generated/         generated Encore client for Nuxt
 backend/Dockerfile             production backend image for Dokploy Compose
 frontend/Dockerfile            production Nuxt image for Dokploy Compose
 .nstack/local.env              local deploy link settings, ignored
@@ -582,7 +600,7 @@ new cache resources that nstack creates after this version.
 Run locally:
 
 ```sh
-pnpm dev
+pnpm dev        # or: nstack dev
 pnpm check
 ```
 
@@ -619,7 +637,27 @@ nstack deploy --ci
 
 ## Targets And Environments
 
-Use `--env <name>` for a separate target such as staging:
+Use `nstack target create` when production is already linked and you want a
+second Dokploy environment for staging, preview, or another version:
+
+```sh
+nstack target create staging \
+  --from prod \
+  --domain staging.example.com \
+  --branch staging
+```
+
+This writes `.nstack/local.staging.env`, copies the Dokploy URL/API key,
+project, repository, and source-provider settings from production, sets
+`DOKPLOY_ENVIRONMENT=staging`, and requires a distinct domain so staging cannot
+accidentally reuse production traffic. It does not copy `.nstack/secrets.env`,
+`.nstack/state.json`, generated infrastructure credentials, or release history.
+
+Use `--environment <name>` when the Dokploy environment name should differ from
+the nstack target, and `--project <name>` when the target should live in another
+Dokploy project.
+
+You can also configure a target from scratch with `--env <name>`:
 
 ```sh
 nstack configure --env staging \
@@ -637,6 +675,11 @@ nstack deploy --env staging
 nstack status --env staging
 nstack logs --env staging --follow
 ```
+
+When multiple local targets exist and you run interactive `nstack deploy`
+without `--env`, nstack asks which environment to deploy. In CI, JSON mode, or
+other automation, pass `--env <name>` explicitly. If only one local target
+exists, deploy uses it without prompting.
 
 List local targets:
 
@@ -931,10 +974,12 @@ nstack unlink
 Planning, build, deploy:
 
 ```sh
+nstack dev
 nstack render
 nstack plan
 nstack build
 nstack deploy
+nstack target create staging --domain staging.example.com
 nstack wait
 nstack redeploy
 nstack rollback [tag-or-commit]

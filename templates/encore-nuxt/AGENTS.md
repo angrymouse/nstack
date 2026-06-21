@@ -16,7 +16,7 @@ Before changing code, read [NSTACK_GUIDELINES.md](./NSTACK_GUIDELINES.md).
 ## Commands
 
 - Install: `pnpm install`
-- Develop: `pnpm dev`
+- Develop: `pnpm dev` or `nstack dev`
 - Check: `pnpm check`
 - Deploy: `nstack deploy`
 - Status: `nstack status`
@@ -25,10 +25,23 @@ Before changing code, read [NSTACK_GUIDELINES.md](./NSTACK_GUIDELINES.md).
 
 ## Working Rules
 
-- Prefer the existing Encore/Nuxt patterns in this repo over introducing new
-  framework conventions.
+- For new features, prefer idiomatic Encore and Nuxt abstractions over legacy
+  local conventions: Encore APIs and generated clients, SQL databases, caches,
+  Pub/Sub topics, WebSockets, and other Encore resources where they fit. Follow
+  existing patterns when they remain healthy, but do not preserve old
+  conventions that add unnecessary layering or turn the app into
+  enterprise-style legacy code.
+- Use `apiClient()` from `frontend/app/utils/api.ts` for frontend calls to
+  Encore APIs. Normal `pnpm dev`/`nstack dev`, `pnpm check`, `pnpm build`, and
+  `nstack deploy` commands keep `frontend/app/generated/encore-client.ts`
+  in sync using local Encore metadata; Encore Cloud login is not required.
+- Keep `scripts/nstack-local.mjs` in the local dev/check path so fresh clones
+  install missing pnpm dependencies and fail early with clear Encore CLI or
+  Docker setup instructions.
 - Keep backend resource declarations in Encore source. Let `nstack deploy`
   reconcile Dokploy from Encore metadata.
+- If multiple local deploy targets exist, interactive `nstack deploy` asks for
+  the environment. Use `--env <name>` in automation.
 - Use `nstack env set`, `nstack env pull`, and `nstack env push` for runtime
   secrets. Never commit secret values.
 - Keep generated deploy files and `.nstack/` state out of manual edits.

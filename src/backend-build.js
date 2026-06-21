@@ -153,7 +153,7 @@ function encoreRuntimeLib({ backendDir, arch }) {
 
   if (arch === hostArch && existsSync(localRuntime)) return localRuntime;
   if (existsSync(cacheRuntime)) return cacheRuntime;
-  throw new Error(`Missing Encore JS runtime for linux/${arch}. Expected ${cacheRuntime}. Run \`encore version update\` or build on the target architecture once.`);
+  throw new Error(`Missing Encore JS runtime for linux/${arch}. Expected ${cacheRuntime}. Run \`encore version update\` or build on the target architecture once. Encore Cloud login is not required.`);
 }
 
 function encoreRuntimePackage({ backendDir }) {
@@ -165,7 +165,7 @@ function encoreRuntimePackage({ backendDir }) {
 
   const nodeModulesPackage = path.join(backendDir, "node_modules/encore.dev");
   if (existsSync(nodeModulesPackage)) return nodeModulesPackage;
-  throw new Error(`Missing Encore JS runtime package: ${runtimePackage}. Run \`encore version update\`.`);
+  throw new Error(`Missing Encore JS runtime package: ${runtimePackage}. Run \`encore version update\`. Encore Cloud login is not required.`);
 }
 
 function homeDir() {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -140,6 +140,52 @@ test("cli allows option values that start with -- through equals syntax", async 
 
   const report = JSON.parse(output.join("\n"));
   assert.equal(report.app.slug, "demo");
+});
+
+test("cli runs the generated app client generator", async () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "nstack-client-cli-"));
+  mkdirSync(path.join(cwd, "scripts"), { recursive: true });
+  writeFileSync(path.join(cwd, "scripts", "nstack-client.mjs"), `
+import { writeFileSync } from "node:fs";
+writeFileSync("client-ran.txt", process.argv.slice(2).join(" "));
+`);
+
+  const output = [];
+  const originalLog = console.log;
+  try {
+    console.log = (value = "") => output.push(String(value));
+    const report = await runCli(["--cwd", cwd, "client", "gen", "--force", "--json"]);
+    assert.deepEqual(report, { skipped: false, mode: "gen" });
+  } finally {
+    console.log = originalLog;
+  }
+
+  assert.equal(existsSync(path.join(cwd, "client-ran.txt")), true);
+  assert.equal(readFileSync(path.join(cwd, "client-ran.txt"), "utf8"), "gen --force");
+  assert.deepEqual(JSON.parse(output.join("\n")), { skipped: false, mode: "gen" });
+});
+
+test("cli runs the generated app dev orchestrator", async () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "nstack-dev-cli-"));
+  mkdirSync(path.join(cwd, "scripts"), { recursive: true });
+  writeFileSync(path.join(cwd, "scripts", "dev.mjs"), `
+import { writeFileSync } from "node:fs";
+writeFileSync("dev-ran.txt", "ok");
+`);
+
+  const output = [];
+  const originalLog = console.log;
+  try {
+    console.log = (value = "") => output.push(String(value));
+    const report = await runCli(["--cwd", cwd, "dev", "--json"]);
+    assert.deepEqual(report, { script: "scripts/dev.mjs" });
+  } finally {
+    console.log = originalLog;
+  }
+
+  assert.equal(existsSync(path.join(cwd, "dev-ran.txt")), true);
+  assert.equal(readFileSync(path.join(cwd, "dev-ran.txt"), "utf8"), "ok");
+  assert.deepEqual(JSON.parse(output.join("\n")), { script: "scripts/dev.mjs" });
 });
 
 test("cli accepts --help and -h after commands", async () => {

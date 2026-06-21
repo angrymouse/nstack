@@ -236,7 +236,7 @@ echo "Docker version 99.0.0"
     assert.equal(backendBuild.ok, false);
     assert.equal(report.ready.render, true);
     assert.equal(report.ready.build, false);
-    assert.ok(report.nextSteps.includes("Install or update Encore so tsbundler-encore is available on PATH."));
+    assert.ok(report.nextSteps.includes("Install or update Encore so tsbundler-encore is available on PATH. Encore Cloud login is not required."));
   } finally {
     console.log = originalLog;
     if (originalPath === undefined) delete process.env.PATH;

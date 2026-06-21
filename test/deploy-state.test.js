@@ -666,6 +666,95 @@ export const db = new SQLDatabase("app", {});
   assert.equal(state.lastRelease, undefined);
 });
 
+test("deploy uses the only configured non-prod target without prompting", async () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "nstack-single-target-"));
+  mkdirSync(path.join(cwd, "backend", "api"), { recursive: true });
+  mkdirSync(path.join(cwd, "frontend"), { recursive: true });
+  mkdirSync(path.join(cwd, ".nstack"), { recursive: true });
+  writeFileSync(path.join(cwd, "nstack.config.mjs"), `export default {
+  app: { name: "Single Target", slug: "single-target" },
+  paths: { backend: "backend", frontend: "frontend", frontendDockerfile: "frontend/Dockerfile" },
+  deploy: { provider: { type: "dokploy" } },
+  verify: { endpoints: [] },
+};\n`);
+  writeFileSync(path.join(cwd, "backend", "api", "status.ts"), "export const ok = true;\n");
+  writeFileSync(path.join(cwd, "frontend", "Dockerfile"), "FROM scratch\n");
+  writeFileSync(path.join(cwd, ".nstack", "local.staging.env"), [
+    "NSTACK_TARGET=staging",
+    "NSTACK_DOMAIN=staging.example.test",
+    "NSTACK_REGISTRY=ghcr.io/acme/single-target",
+    "",
+  ].join("\n"));
+
+  const output = [];
+  const originalLog = console.log;
+  const originalIsTTY = process.stdin.isTTY;
+  const originalTarget = process.env.NSTACK_TARGET;
+  try {
+    console.log = (value = "") => output.push(String(value));
+    process.stdin.isTTY = true;
+    delete process.env.NSTACK_TARGET;
+    const report = await deploy({ cwd, dryRun: true });
+    assert.equal(report.deploy.target, "staging");
+    assert.equal(report.app.url, "https://staging.example.test");
+  } finally {
+    console.log = originalLog;
+    process.stdin.isTTY = originalIsTTY;
+    if (originalTarget === undefined) delete process.env.NSTACK_TARGET;
+    else process.env.NSTACK_TARGET = originalTarget;
+  }
+});
+
+test("deploy prompts for a target when multiple targets are configured", async () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "nstack-prompt-target-"));
+  mkdirSync(path.join(cwd, "backend", "api"), { recursive: true });
+  mkdirSync(path.join(cwd, "frontend"), { recursive: true });
+  mkdirSync(path.join(cwd, ".nstack"), { recursive: true });
+  writeFileSync(path.join(cwd, "nstack.config.mjs"), `export default {
+  app: { name: "Prompt Target", slug: "prompt-target" },
+  paths: { backend: "backend", frontend: "frontend", frontendDockerfile: "frontend/Dockerfile" },
+  deploy: { provider: { type: "dokploy" } },
+  verify: { endpoints: [] },
+};\n`);
+  writeFileSync(path.join(cwd, "backend", "api", "status.ts"), "export const ok = true;\n");
+  writeFileSync(path.join(cwd, "frontend", "Dockerfile"), "FROM scratch\n");
+  writeFileSync(path.join(cwd, ".nstack", "local.env"), [
+    "NSTACK_DOMAIN=prod.example.test",
+    "NSTACK_REGISTRY=ghcr.io/acme/prompt-target-prod",
+    "",
+  ].join("\n"));
+  writeFileSync(path.join(cwd, ".nstack", "local.staging.env"), [
+    "NSTACK_TARGET=staging",
+    "NSTACK_DOMAIN=staging.example.test",
+    "NSTACK_REGISTRY=ghcr.io/acme/prompt-target-staging",
+    "DOKPLOY_ENVIRONMENT=staging",
+    "",
+  ].join("\n"));
+
+  const output = [];
+  const originalLog = console.log;
+  const originalIsTTY = process.stdin.isTTY;
+  const envKeys = ["NSTACK_TARGET", "NSTACK_DEPLOY_TARGET"];
+  const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+  try {
+    console.log = (value = "") => output.push(String(value));
+    process.stdin.isTTY = true;
+    delete process.env.NSTACK_TARGET;
+    process.env.NSTACK_DEPLOY_TARGET = "staging";
+    const report = await deploy({ cwd, dryRun: true });
+    assert.equal(report.deploy.target, "staging");
+    assert.equal(report.deploy.environment, "staging");
+    assert.equal(report.app.url, "https://staging.example.test");
+  } finally {
+    console.log = originalLog;
+    process.stdin.isTTY = originalIsTTY;
+    for (const key of envKeys) {
+      if (originalEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = originalEnv[key];
+    }
+  }
+});
+
 test("deploy repairs stale Dokploy environment state before provisioning databases", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "nstack-stale-env-"));
   mkdirSync(path.join(cwd, ".nstack"), { recursive: true });
@@ -1468,7 +1557,9 @@ test("deploy auto-commits generated source-backed artifacts before triggering Do
   const cwd = path.join(root, "app");
   const remote = path.join(root, "remote.git");
   mkdirSync(path.join(cwd, "backend", "api"), { recursive: true });
+  mkdirSync(path.join(cwd, "frontend", "app", "generated"), { recursive: true });
   mkdirSync(path.join(cwd, "frontend"), { recursive: true });
+  mkdirSync(path.join(cwd, "scripts"), { recursive: true });
   mkdirSync(path.join(cwd, ".nstack"), { recursive: true });
   writeFileSync(path.join(cwd, ".gitignore"), ".nstack\nnode_modules\n");
   writeFileSync(path.join(cwd, "nstack.config.mjs"), `export default {
@@ -1486,6 +1577,14 @@ test("deploy auto-commits generated source-backed artifacts before triggering Do
   writeFileSync(path.join(cwd, "backend", "api", "status.ts"), `export const ok = true;\n`);
   writeFileSync(path.join(cwd, "backend", "Dockerfile"), "FROM scratch\n");
   writeFileSync(path.join(cwd, "frontend", "Dockerfile"), "FROM scratch\n");
+  writeFileSync(path.join(cwd, "frontend", "app", "generated", "encore-client.ts"), "old client\n");
+  writeFileSync(path.join(cwd, "scripts", "nstack-client.mjs"), `import { mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+mkdirSync(path.join(root, "frontend", "app", "generated"), { recursive: true });
+writeFileSync(path.join(root, "frontend", "app", "generated", "encore-client.ts"), "generated client\\n");
+`);
   execFileSync("git", ["init", "--bare", remote], { stdio: "ignore" });
   execFileSync("git", ["init"], { cwd, stdio: "ignore" });
   execFileSync("git", ["config", "user.email", "nstack@example.test"], { cwd });
@@ -1548,6 +1647,7 @@ test("deploy auto-commits generated source-backed artifacts before triggering Do
     const committedFiles = execFileSync("git", ["show", "--name-only", "--format=", "HEAD"], { cwd, encoding: "utf8" });
     assert.match(committedFiles, /backend\/\.gitignore/);
     assert.match(committedFiles, /deploy\/nstack\/compose\.dokploy\.yaml/);
+    assert.match(committedFiles, /frontend\/app\/generated\/encore-client\.ts/);
     assert.deepEqual(execFileSync("git", ["log", "-2", "--pretty=%s"], { cwd, encoding: "utf8" }).trim().split("\n"), [
       "Update nstack deploy artifacts",
       "Update app status",

@@ -3,8 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "pnpm --parallel --filter './backend' --filter './frontend' dev",
-    "build": "pnpm --dir frontend build",
+    "dev": "node scripts/dev.mjs",
+    "build": "node scripts/nstack-client.mjs gen && pnpm --dir frontend build",
     "check": "node scripts/check.mjs",
     "deploy": "nstack deploy",
     "status": "nstack status"

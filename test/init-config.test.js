@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -87,6 +87,7 @@ exit 1
   assert.equal(execFileSync("git", ["-C", target, "status", "--short"], { encoding: "utf8" }).trim(), "");
   assert.deepEqual(readFileSync(pnpmLog, "utf8").trim().split("\n"), ["install --no-frozen-lockfile", "approve-builds --all"]);
   assert.equal(execFileSync("git", ["-C", target, "ls-tree", "-r", "--name-only", "HEAD", "pnpm-lock.yaml"], { encoding: "utf8" }).trim(), "pnpm-lock.yaml");
+  assert.equal(execFileSync("git", ["-C", target, "ls-tree", "-r", "--name-only", "HEAD", "frontend/app/generated/encore-client.ts"], { encoding: "utf8" }).trim(), "frontend/app/generated/encore-client.ts");
   assert.equal(execFileSync("git", ["-C", target, "ls-tree", "-r", "--name-only", "HEAD", "backend/.gitignore"], { encoding: "utf8" }).trim(), "backend/.gitignore");
   assert.equal(execFileSync("git", ["-C", target, "ls-tree", "-r", "--name-only", "HEAD", "AGENTS.md"], { encoding: "utf8" }).trim(), "AGENTS.md");
   assert.equal(execFileSync("git", ["-C", target, "ls-tree", "-r", "--name-only", "HEAD", "CLAUDE.md"], { encoding: "utf8" }).trim(), "CLAUDE.md");
@@ -95,6 +96,9 @@ exit 1
   assert.equal(readlinkSync(path.join(target, "CLAUDE.md")), "AGENTS.md");
   assert.match(readFileSync(path.join(target, "AGENTS.md"), "utf8"), /NSTACK_GUIDELINES\.md/);
   assert.match(readFileSync(path.join(target, "pnpm-workspace.yaml"), "utf8"), /onlyBuiltDependencies:/);
+  assert.equal(existsSync(path.join(target, "backend", "node_modules")), false);
+  assert.equal(existsSync(path.join(target, "backend", ".encore")), false);
+  assert.equal(existsSync(path.join(target, "backend", "encore.gen")), false);
 
   const gitignore = readFileSync(path.join(target, ".gitignore"), "utf8");
   assert.match(gitignore, /^\.nstack$/m);
@@ -114,8 +118,8 @@ exit 1
 
   const manifest = JSON.parse(readFileSync(path.join(target, "package.json"), "utf8"));
   assert.deepEqual(Object.keys(manifest.scripts).sort(), ["build", "check", "deploy", "dev", "status"]);
-  assert.equal(manifest.scripts.dev, "pnpm --parallel --filter './backend' --filter './frontend' dev");
-  assert.equal(manifest.scripts.build, "pnpm --dir frontend build");
+  assert.equal(manifest.scripts.dev, "node scripts/dev.mjs");
+  assert.equal(manifest.scripts.build, "node scripts/nstack-client.mjs gen && pnpm --dir frontend build");
   assert.equal(manifest.scripts.check, "node scripts/check.mjs");
   assert.equal(manifest.scripts.deploy, "nstack deploy");
   assert.equal(manifest.scripts.status, "nstack status");
@@ -154,9 +158,19 @@ exit 1
   assert.match(checkRunner, /"backend", "exec", "encore", "check", ""/);
   assert.match(checkRunner, /"backend", "exec", "tsc", "--noEmit"/);
   assert.match(checkRunner, /"frontend", "exec", "nuxi", "prepare"/);
+  assert.match(checkRunner, /"scripts\/nstack-client\.mjs", "gen"/);
 
   const backendManifest = JSON.parse(readFileSync(path.join(target, "backend", "package.json"), "utf8"));
   assert.equal(backendManifest.scripts.test, "node --test");
+
+  const encoreApp = JSON.parse(readFileSync(path.join(target, "backend", "encore.app"), "utf8"));
+  assert.equal(encoreApp.id, "app");
+
+  const generatedClient = readFileSync(path.join(target, "frontend", "app", "generated", "encore-client.ts"), "utf8");
+  assert.match(generatedClient, /Client is an API client for the app Encore application/);
+  assert.match(generatedClient, /nstack\/Dokploy target/);
+  assert.doesNotMatch(generatedClient, /encr\.app/);
+  assert.match(generatedClient, /public async status/);
 
   const backendDockerfile = readFileSync(path.join(target, "backend", "Dockerfile"), "utf8");
   assert.match(backendDockerfile, /apt-get install -y --no-install-recommends ca-certificates/);

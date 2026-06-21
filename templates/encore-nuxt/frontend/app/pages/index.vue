@@ -1,13 +1,5 @@
 <script setup lang="ts">
-interface Status {
-  app: string;
-  commit: string;
-  image_tag: string;
-  database_ok: boolean;
-  uptime_seconds: number;
-}
-
-const { data, error } = await useAsyncData("status", () => apiGet<Status>("/status"));
+const { data, error } = await useAsyncData("status", () => apiClient().api.status());
 </script>
 
 <template>

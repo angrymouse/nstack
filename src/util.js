@@ -3,6 +3,19 @@ import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, copyFileSync, rmSync } from "node:fs";
 import path from "node:path";
 
+const ignoredTemplateEntries = new Set([
+  "node_modules",
+  ".encore",
+  "encore.gen",
+  ".nuxt",
+  ".output",
+  "dist",
+  "coverage",
+  ".turbo",
+  ".vite",
+  ".cache",
+]);
+
 export function fileExists(file) {
   return existsSync(file);
 }
@@ -35,6 +48,7 @@ export function copyTree(from, to, replacements = {}) {
   if (stat.isDirectory()) {
     ensureDir(to);
     for (const entry of readdirSync(from)) {
+      if (ignoredTemplateEntries.has(entry)) continue;
       copyTree(path.join(from, entry), path.join(to, entry), replacements);
     }
     return;
@@ -55,6 +69,7 @@ export function copyTree(from, to, replacements = {}) {
 
 function isTemplateTextFile(file) {
   return /\.(json|mjs|js|ts|vue|md|yml|yaml|sql|gitignore|env|txt|toml|Dockerfile)$/.test(file)
+    || path.basename(file) === "encore.app"
     || path.basename(file).startsWith(".");
 }
 

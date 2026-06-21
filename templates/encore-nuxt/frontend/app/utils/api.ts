@@ -1,3 +1,5 @@
+import Client, { type ClientOptions } from "../generated/encore-client";
+
 function clean(value: unknown): string {
   return String(value || "").replace(/\/+$/, "");
 }
@@ -11,8 +13,21 @@ export function apiBaseUrl(): string {
   return clean(config.public.apiBaseUrl) || "/api";
 }
 
-export async function apiGet<T>(path: string): Promise<T> {
-  const response = await fetch(`${apiBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`);
-  if (!response.ok) throw new Error(`API request failed: ${response.status}`);
-  return await response.json() as T;
+export function apiClient(options: ClientOptions = {}): Client {
+  const requestInit = {
+    ...options.requestInit,
+    headers: {
+      ...serverRequestHeaders(),
+      ...(options.requestInit?.headers || {}),
+    },
+  };
+  return new Client(apiBaseUrl(), { ...options, requestInit });
+}
+
+function serverRequestHeaders(): Record<string, string> {
+  if (!import.meta.server) return {};
+  return Object.fromEntries(
+    Object.entries(useRequestHeaders(["authorization", "cookie"]))
+      .filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].length > 0),
+  );
 }

@@ -1,9 +1,14 @@
 const isProduction = process.env.NODE_ENV === "production";
 const backendHost = process.env.NSTACK_BACKEND_HOST || "backend";
-const publicApiBaseUrl = process.env.NUXT_PUBLIC_API_BASE_URL || (isProduction ? "/api" : "http://localhost:4000");
+const publicApiBaseUrl =
+  process.env.NUXT_PUBLIC_API_BASE_URL ||
+  process.env.NUXT_PUBLIC_NSTACK_API_BASE_URL ||
+  process.env.NSTACK_PUBLIC_API_BASE_URL ||
+  (isProduction ? "/api" : "http://localhost:4000");
 const serverApiBaseUrl =
   process.env.NUXT_API_SERVER_BASE_URL ||
   process.env.NUXT_API_INTERNAL_BASE_URL ||
+  process.env.NSTACK_API_BASE_URL ||
   (isProduction ? `http://${backendHost}:8080` : "http://localhost:4000");
 
 export default defineNuxtConfig({

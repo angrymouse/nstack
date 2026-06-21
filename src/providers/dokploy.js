@@ -268,17 +268,15 @@ export class DokployProvider {
   async ensureDomains(composeId, resources = {}) {
     const domains = asList(await this.client.apiGet("domain.byComposeId", { composeId }));
     const expected = expectedComposeDomains(this.config, composeId, resources);
-    const deleted = new Set();
-    for (const domain of staleManagedDomains(this.config, domains, expected)) {
+    const deleted = new Set(await Promise.all(staleManagedDomains(this.config, domains, expected).map(async (domain) => {
       const domainId = idOf(domain, ["domainId", "id"]);
-      if (!domainId) continue;
+      if (!domainId) return "";
       await this.client.apiPost("domain.delete", { domainId });
-      deleted.add(domainId);
-    }
+      return domainId;
+    })));
+    deleted.delete("");
     const remaining = domains.filter((domain) => !deleted.has(idOf(domain, ["domainId", "id"])));
-    for (const domain of expected) {
-      await this.upsertDomain(remaining, domain);
-    }
+    await Promise.all(expected.map((domain) => this.upsertDomain(remaining, domain)));
   }
 
   async validateAppDomain() {
@@ -535,21 +533,26 @@ export class DokployProvider {
     const composeId = await this.findComposeId(environmentId);
     if (!composeId) throw new Error(`Dokploy Compose app ${composeName} was not found in environment ${environmentName}.`);
 
-    const compose = await this.client.apiGet("compose.one", { composeId });
+    const composePromise = this.client.apiGet("compose.one", { composeId });
+    const schedulesPromise = this.pullScheduleMap(composeId, resources.crons || []);
+    const postgresPromise = (resources.databases || []).length > 0 ? this.findPostgresId(environmentId) : Promise.resolve("");
+    const redisPromise = (resources.caches || []).length > 0 ? this.findRedisId(environmentId) : Promise.resolve("");
+    const [compose, schedules, postgresId, redisId] = await Promise.all([
+      composePromise,
+      schedulesPromise,
+      postgresPromise,
+      redisPromise,
+    ]);
     const env = parseDotEnv(compose?.env || compose?.environment || "");
     const dokploy = {
       projectId,
       environmentId,
       composeId,
-      schedules: await this.pullScheduleMap(composeId, resources.crons || []),
+      schedules,
     };
 
-    if ((resources.databases || []).length > 0) {
-      dokploy.postgresId = await this.findPostgresId(environmentId);
-    }
-    if ((resources.caches || []).length > 0) {
-      dokploy.redisId = await this.findRedisId(environmentId);
-    }
+    if (postgresId) dokploy.postgresId = postgresId;
+    if (redisId) dokploy.redisId = redisId;
 
     return {
       dokploy: Object.fromEntries(Object.entries(dokploy).filter(([, value]) => value !== "")),

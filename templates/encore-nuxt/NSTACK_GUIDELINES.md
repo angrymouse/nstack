@@ -14,6 +14,8 @@ This app is generated for nstack and deploys to Dokploy.
 `nstack deploy` inspects Encore metadata, renders `deploy/nstack/`, syncs Dokploy
 resources, pushes source when source-backed deploys are configured, updates the
 Dokploy Compose app, syncs schedules/domains, and verifies the deployment.
+When multiple local deploy targets exist, interactive `nstack deploy` asks which
+environment to deploy. Automation should pass `--env <name>`.
 
 Do not edit `deploy/nstack/encore.infra.json` or
 `deploy/nstack/compose.dokploy.yaml` directly. Change app code or
@@ -34,6 +36,26 @@ matching Dokploy resource. If cleanup is declined, the ignore is recorded in
 `nstack.config.mjs`.
 
 For source-backed/git deploys, destructive resource cleanup is skipped.
+
+## Frontend API Client
+
+The Nuxt app uses the generated Encore TypeScript client at
+`frontend/app/generated/encore-client.ts`, wrapped by `apiClient()` in
+`frontend/app/utils/api.ts` for the correct browser, SSR, and Dokploy base URLs.
+The generated client's `Environment()` helper is patched for nstack/Dokploy
+targets and does not point at Encore Cloud environments.
+
+`pnpm dev` and `nstack dev` run the same local orchestrator: Encore backend,
+generated client watcher, and Nuxt frontend. On a fresh clone, `pnpm dev` and
+`pnpm check` install missing pnpm dependencies before starting local work. They
+also fail early with direct setup instructions when the Encore CLI or Docker
+daemon is missing. The watcher only rewrites the client when the generated
+output changes, so Nuxt HMR is not triggered by backend edits that leave the API
+surface unchanged. `pnpm check`, `pnpm build`, and `nstack deploy` also sync it
+automatically. Use `nstack client gen` only when you explicitly want to
+regenerate the client outside the normal workflow. Generation and deploy
+metadata use local Encore commands for Dokploy/nstack targets; Encore Cloud
+login is not required.
 
 ## Backups
 

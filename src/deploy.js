@@ -2,6 +2,7 @@ import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { buildBackendImage } from "./backend-build.js";
 import { backupBeforeDeletion, deletionBackupDisabled, deletionBackupEnvName } from "./backup.js";
+import { hasClientGenerator, runClientGenerator } from "./client.js";
 import { composeEnvironmentValues, renderComposeEnvironment } from "./compose-env.js";
 import {
   loadConfig,
@@ -36,6 +37,7 @@ import { renderDokployCompose } from "./render/compose.js";
 import { renderEncoreInfra } from "./render/infra.js";
 import { Prompter } from "./prompt.js";
 import { createStatusReport, statusCheckError } from "./status.js";
+import { discoverTargets } from "./targets.js";
 import { ensureDir, fileExists, randomSecret, run, commandOutput, writeText, mergeEnvFile, parseDotEnv, readText, readJSON, writeJSON } from "./util.js";
 
 const releaseManifestName = "release.json";
@@ -46,6 +48,7 @@ const maxValidationPollMs = 250;
 const defaultEndpointRequestTimeoutMs = 2000;
 const encoreBackendGitignorePath = "backend/.gitignore";
 const encoreBackendGitignoreText = "encore.gen.go\nencore.gen.cue\n/.encore\n/encore.gen\n";
+const generatedClientPath = "frontend/app/generated/encore-client.ts";
 
 export async function configure(options = {}) {
   const cwd = options.cwd || process.cwd();
@@ -69,21 +72,25 @@ export async function configure(options = {}) {
 
 export async function deploy(options = {}) {
   const cwd = options.cwd || process.cwd();
-  let config = await loadConfig(cwd, { target: targetFromOptions(options) });
+  const selectedTarget = await resolveDeployTarget(cwd, options);
+  let config = await loadConfig(cwd, { target: selectedTarget });
   config = await completeDeployConfig(config, cwd, options);
   const state = loadState(cwd, config.deploy.target);
   const skipBuild = Boolean(options.skipBuild || options.prebuilt || config.deploy.buildMode === "compose");
-  let release = resolveRelease(config, cwd, { ...options, skipBuild });
   const progress = createProgress({ enabled: !options.json && !options.renderOnly && !options.dryRun && !options.buildOnly });
-  const resources = await progress.step("Inspecting Encore resources", () => inspectResources(cwd, config));
   const timings = [];
   const localOnly = options.renderOnly || options.dryRun || options.buildOnly;
   const command = options.buildOnly ? "build" : localOnly ? "render" : "deploy";
+  const resources = await progress.step("Inspecting Encore resources", () => inspectResources(cwd, config));
   const initialReport = await progress.step("Running local preflight checks", () => createDoctorReport({ cwd, config, state, resources }));
   assertPreflight(command, initialReport, {
     skipBuild,
     ignore: localOnly ? [] : ["app-secrets"],
   });
+  if (!options.renderOnly && !options.dryRun && !options.prebuilt) {
+    await progress.step("Syncing frontend API client", () => syncFrontendApiClient(cwd, timings, { quiet: options.json }));
+  }
+  let release = resolveRelease(config, cwd, { ...options, skipBuild });
   if (!localOnly) {
     const remoteReport = await progress.step("Checking Dokploy access", () => createDoctorReport({ cwd, config, state, resources, checkRemote: true }));
     assertPreflight("deploy", remoteReport, {
@@ -96,8 +103,10 @@ export async function deploy(options = {}) {
     const secretsReport = await progress.step("Checking app secrets", () => createDoctorReport({ cwd, config, state, resources }));
     assertPreflight("deploy", secretsReport, { skipBuild });
     const preflightProvider = new DokployProvider({ config, state });
-    await progress.step("Validating DNS", () => timedAsync("dokploy: validate dns", true, timings, () => preflightProvider.validateAppDomain()));
-    await progress.step("Enabling Dokploy cleanup", () => timedAsync("dokploy: enable docker cleanup", true, timings, () => preflightProvider.enableDockerCleanup()));
+    await progress.step("Checking Dokploy DNS and cleanup", () => Promise.all([
+      timedAsync("dokploy: validate dns", true, timings, () => preflightProvider.validateAppDomain()),
+      timedAsync("dokploy: enable docker cleanup", true, timings, () => preflightProvider.enableDockerCleanup()),
+    ]));
   }
   const infra = ensureInfraSecrets({ config, resources, state });
   const generatedInfraSecrets = {
@@ -352,6 +361,46 @@ export async function deploy(options = {}) {
   if (options.json) console.log(JSON.stringify(report, null, 2));
   else printDeployResult({ config, release, state: nextState });
   return report;
+}
+
+async function resolveDeployTarget(cwd, options = {}) {
+  const explicit = targetFromOptions(options);
+  if (explicit || process.env.NSTACK_TARGET) return explicit;
+
+  const targets = discoverTargets(cwd);
+  if (targets.length === 1) return targets[0].name;
+  if (targets.length <= 1) return "";
+  if (options.renderOnly || options.buildOnly) return "";
+  if (options.json || options.yes || options.ci || process.stdin.isTTY !== true) return "";
+
+  const defaultIndex = Math.max(0, targets.findIndex((target) => target.name === "prod"));
+  const prompter = new Prompter({ yes: false });
+  try {
+    const selected = await prompter.select("NSTACK_DEPLOY_TARGET", "Deploy environment", targets.map(targetChoice), { defaultIndex });
+    return selected.value;
+  } finally {
+    prompter.close();
+  }
+}
+
+function targetChoice(target) {
+  const hint = [
+    target.environment ? `Dokploy ${target.environment}` : "",
+    target.domain ? `https://${target.domain}` : "",
+    target.linked ? "linked" : "unlinked",
+  ].filter(Boolean).join(" - ");
+  return {
+    label: target.name,
+    value: target.name,
+    hint,
+  };
+}
+
+function syncFrontendApiClient(cwd, timings = [], options = {}) {
+  if (!hasClientGenerator(cwd)) return;
+  timed("frontend: encore client", Boolean(options.quiet), timings, () => {
+    runClientGenerator(cwd, "gen", { capture: Boolean(options.quiet) });
+  });
 }
 
 function clearDokployEnvironmentState(dokploy) {
@@ -1874,6 +1923,7 @@ function isGeneratedDeployPath(file) {
 
 function isGeneratedSourcePath(cwd, file) {
   if (isGeneratedDeployPath(file)) return true;
+  if (file === generatedClientPath && hasClientGenerator(cwd)) return true;
   return file === encoreBackendGitignorePath
     && readText(path.join(cwd, file), "") === encoreBackendGitignoreText;
 }

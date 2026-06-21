@@ -192,7 +192,7 @@ import * as THREE from "three";
 import { z } from "zod";
 
 const schema = z.object({ app: z.string(), uptime_seconds: z.number() }).passthrough();
-const { data } = await useAsyncData("status", async () => schema.parse(await apiGet("/status")));
+const { data } = await useAsyncData("status", async () => schema.parse(await apiClient().api.status()));
 const saved = useStorage("nstack-bench-filter", "all");
 const queryClient = new QueryClient();
 const vector = new THREE.Vector3(1, 2, 3);

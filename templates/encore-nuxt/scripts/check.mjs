@@ -1,5 +1,10 @@
 #!/usr/bin/env node
-import { spawn } from "node:child_process";
+import { ensureLocalReady, run } from "./nstack-local.mjs";
+
+await ensureLocalReady();
+
+const client = await run("node", ["scripts/nstack-client.mjs", "gen"]);
+if (client !== 0) process.exit(client);
 
 const tasks = [
   ["pnpm", ["--dir", "backend", "exec", "encore", "check", ""]],
@@ -10,11 +15,3 @@ const tasks = [
 const results = await Promise.all(tasks.map(([command, args]) => run(command, args)));
 const failed = results.find((code) => code !== 0);
 if (failed) process.exit(failed);
-
-function run(command, args) {
-  return new Promise((resolve) => {
-    const child = spawn(command, args, { stdio: "inherit", shell: process.platform === "win32" });
-    child.on("close", (code) => resolve(code || 0));
-    child.on("error", () => resolve(1));
-  });
-}

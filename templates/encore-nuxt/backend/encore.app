@@ -1,5 +1,5 @@
 {
-  "id": "",
+  "id": "__APP_SLUG__",
   "lang": "typescript",
   "global_cors": {
     "allow_origins_with_credentials": [

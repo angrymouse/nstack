@@ -43,12 +43,15 @@ export async function createDoctorReport({
 } = {}) {
   const resolvedConfig = config || await loadConfig(cwd, { target });
   const resolvedState = state || loadState(cwd, resolvedConfig.deploy.target);
+  const resourcesPromise = resources ? Promise.resolve(resources) : inspectResources(cwd, resolvedConfig);
+  const remotePromise = inspectRemote(resolvedConfig, resolvedState, { checkRemote });
+  const [resolvedResources, remote] = await Promise.all([resourcesPromise, remotePromise]);
   return buildReport({
     cwd,
     config: resolvedConfig,
     state: resolvedState,
-    resources: resources || await inspectResources(cwd, resolvedConfig),
-    remote: await inspectRemote(resolvedConfig, resolvedState, { checkRemote }),
+    resources: resolvedResources,
+    remote,
   });
 }
 
@@ -301,8 +304,8 @@ function buildChecks(report) {
     check("frontend", report.files.frontend, "Create the configured frontend directory or update paths.frontend."),
     check("frontend-dockerfile", report.files.frontendDockerfile, "Create the frontend Dockerfile or update paths.frontendDockerfile."),
     check("node", report.tools.node.ok, "Install Node.js 22 or newer."),
-    check("encore", report.tools.encore.ok, "Install the Encore CLI."),
-    check("backend-build", report.tools.backendBuild.ok, "Install or update Encore so tsbundler-encore is available on PATH."),
+    check("encore", report.tools.encore.ok, "Install the Encore CLI. Encore Cloud login is not required."),
+    check("backend-build", report.tools.backendBuild.ok, "Install or update Encore so tsbundler-encore is available on PATH. Encore Cloud login is not required."),
     check("docker", report.tools.docker.ok, "Install Docker and make sure it is available on PATH."),
     check("app-secrets", report.secrets.missing.length === 0, `Set missing app runtime secrets: ${report.secrets.missing.join(", ")}`),
     check("resource-discovery", report.resources.source !== "error", "Fix Encore resource discovery before deploying."),

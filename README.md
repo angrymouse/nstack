@@ -38,7 +38,7 @@ path that gives Dokploy native push webhooks.
 ## Daily Commands
 
 ```sh
-pnpm dev
+pnpm dev        # or: nstack dev
 pnpm check
 nstack deploy
 nstack status
@@ -51,6 +51,7 @@ deploy is running.
 
 ```sh
 nstack doctor
+nstack target create staging --domain staging.example.com
 nstack pull
 nstack backup
 nstack rollback
@@ -59,9 +60,16 @@ nstack cleanup
 nstack open dashboard
 ```
 
-The generated app only exposes `dev`, `build`, `check`, `deploy`, and `status`
-as package scripts. The rest stays in the `nstack` CLI so new projects do not
-start with a wall of commands.
+The generated app keeps the package scripts small. `pnpm dev` runs the same
+local orchestrator as `nstack dev`: Encore backend, Nuxt frontend, and generated
+client sync for HMR. On a fresh clone, `pnpm dev`/`nstack dev` and `pnpm check`
+install missing pnpm dependencies before running local checks. They also fail
+early with direct setup instructions when the Encore CLI or Docker daemon is
+missing. `pnpm check`, `pnpm build`, and `nstack deploy` sync the Encore
+TypeScript client used by the Nuxt frontend. `nstack client gen` is available
+when you explicitly want to regenerate it. Client generation and deploy metadata
+use local Encore commands for Dokploy/nstack targets; Encore Cloud login is not
+required.
 
 `nstack cleanup` uses Dokploy cleanup endpoints for stopped containers, unused
 images, unused volumes, and Docker builder cache.
@@ -140,4 +148,6 @@ nstack deploy --prebuilt
 
 For staging or other targets, pass `--env <name>`. nstack writes target-scoped
 files such as `.nstack/local.staging.env`, `.nstack/secrets.staging.env`, and
-`.nstack/state.staging.json`.
+`.nstack/state.staging.json`. If multiple local targets exist, interactive
+`nstack deploy` asks which environment to deploy; automation should pass
+`--env <name>`.

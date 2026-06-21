@@ -2,9 +2,11 @@ import path from "node:path";
 import { symlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { backup } from "./backup.js";
+import { runClientGenerator } from "./client.js";
 import { cleanup } from "./cleanup.js";
 import { configure, deploy, redeploy, rollback, verify, waitForDeployment } from "./deploy.js";
 import { cancelDeployment, inspectDeployment, listDeployments, logs } from "./deployments.js";
+import { runDev } from "./dev.js";
 import { promptDokployInstance } from "./dokploy-instances.js";
 import { Prompter } from "./prompt.js";
 import { DokployClient, loadDokploySourceProviders } from "./providers/dokploy.js";
@@ -24,7 +26,7 @@ import { pull } from "./pull.js";
 import { createProgress } from "./progress.js";
 import { runSecretCommand } from "./secrets.js";
 import { showStatus } from "./status.js";
-import { listTargets } from "./targets.js";
+import { runTargetCommand } from "./targets.js";
 import { undeploy } from "./undeploy.js";
 import { commandOutput, copyTree, ensureDir, fileExists, mergeEnvFile, readJSON, removeIfExists, run, slugify } from "./util.js";
 
@@ -95,6 +97,7 @@ const valueOptions = new Set([
   "timeoutMs",
   "intervalMs",
   "to",
+  "from",
   "packageManager",
   "output",
   "backupDestinationId",
@@ -110,7 +113,7 @@ export async function runCli(argv) {
   if (command === "init") return init(args[0] || ".", options);
   if (command === "configure" || command === "config" || command === "link") return configure(options);
   if (command === "unlink") return unlink(options);
-  if (command === "targets" || command === "target" || command === "envs" || command === "environments") return listTargets(options);
+  if (command === "targets" || command === "target" || command === "envs" || command === "environments") return runTargetCommand(args, options);
   if (command === "pull") return pull(options);
   if (command === "backup") return backup(options);
   if (command === "inspect") return inspectDeployment(args, options);
@@ -121,6 +124,8 @@ export async function runCli(argv) {
   if (command === "cleanup" || command === "clean") return cleanup(options);
   if (command === "undeploy" || command === "destroy") return undeploy(options);
   if (command === "open") return openTarget(args, options);
+  if (command === "dev") return dev(args, options);
+  if (command === "client") return client(args, options);
   if (command === "env" || command === "secret" || command === "secrets") return runSecretCommand(args, options);
   if (command === "build") return deploy({ ...options, buildOnly: true, skipVerify: true, skipStatus: true });
   if (command === "deploy") return deploy({ ...options, renderOnly: false });
@@ -132,6 +137,23 @@ export async function runCli(argv) {
   if (command === "doctor") return doctor(options);
   if (command === "status") return showStatus(options);
   throw new Error(`Unknown command: ${command}. Run nstack help.`);
+}
+
+async function client(args, options = {}) {
+  const cwd = options.cwd || process.cwd();
+  const report = runClientGenerator(cwd, args[0] || "gen", {
+    capture: Boolean(options.json),
+    force: Boolean(options.force),
+  });
+  if (options.json) console.log(JSON.stringify(report, null, 2));
+  return report;
+}
+
+async function dev(args, options = {}) {
+  const cwd = options.cwd || process.cwd();
+  const report = runDev(cwd, args, { capture: Boolean(options.json) });
+  if (options.json) console.log(JSON.stringify(report, null, 2));
+  return report;
 }
 
 async function init(target, options) {
@@ -1032,6 +1054,7 @@ Configure later:
   nstack configure --domain <host> --dokploy-url <url> --dokploy-api-key <key> --repository <git-url>
 
 Daily commands:
+  nstack dev                     run Encore, Nuxt, and client sync for local HMR
   nstack deploy                  build, deploy, verify, and print the URL
   nstack status                  show the current release and Dokploy state
   nstack env set <name>          save an app runtime secret locally
@@ -1039,12 +1062,15 @@ Daily commands:
 
 When needed:
   nstack doctor                  explain missing local setup
+  nstack target create staging --domain <host>
+                                create another Dokploy environment target
   nstack pull                    recover local state from Dokploy
   nstack backup                  snapshot Dokploy config and local data dumps
   nstack rollback [tag|commit]   deploy a previous verified release
   nstack undeploy                delete this app's Dokploy resources
   nstack cleanup                 prune stopped containers, images, volumes, and build cache
   nstack open [dashboard]        open the app or Dokploy dashboard
+  nstack client gen              regenerate the Encore client when needed
 
 Options:
   --cwd <dir>                    run against another app directory
