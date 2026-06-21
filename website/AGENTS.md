@@ -56,6 +56,14 @@ Before changing code, read [NSTACK_GUIDELINES.md](./NSTACK_GUIDELINES.md).
   source-backed Git dirty checks to this app. Subdirectory source-backed deploys
   default to app-prefixed Dokploy `composePath` and `watchPaths`, so sibling
   nstack apps in the same repo do not block each other.
+- In prose and frontend copy, avoid technical detail unless it helps the reader
+  decide, act, or understand current state. Remove implementation facts that
+  only make copy sound more technical.
+- Avoid decorative badges, status pills, pulsing dots, and tiny uppercase
+  subtitles when they do not carry real product or workflow meaning.
+- Check every visible line of website copy after editing. Each line should tell
+  the user what nstack is, what they can do, what changed, or what command to
+  run. Replace buzzphrases with concrete wording that names the real action.
 - Use `nstack env set`, `nstack env pull`, and `nstack env push` for runtime
   secrets. Never commit secret values.
 - Keep generated deploy files and `.nstack/` state out of manual edits.

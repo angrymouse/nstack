@@ -2,11 +2,7 @@
 const installCommand = "curl -fsSL https://nstack.playground.nik.technology/install.sh | bash";
 const repoUrl = "https://git.nik.technology/angrymouse/nstack";
 
-const { data: status } = await useAsyncData("status", () => apiClient().api.ready());
 const copied = ref(false);
-
-const statusLabel = computed(() => (status.value?.ok ? "online" : "local"));
-const commitLabel = computed(() => status.value?.commit || "local");
 
 async function copyInstall() {
   if (!import.meta.client || !navigator.clipboard) return;
@@ -35,12 +31,10 @@ async function copyInstall() {
 
     <section id="top" class="hero">
       <div class="hero-copy">
-        <p class="eyebrow">Encore + Nuxt + Dokploy</p>
         <h1>nstack</h1>
         <p class="lede">
-          A generated full-stack app shape with local HMR, Encore client sync,
-          Dokploy environments, and source-built deployments that do not require
-          Encore Cloud.
+          Create an Encore + Nuxt app with typed frontend calls, local dev,
+          and Dokploy deploys. Encore Cloud is optional.
         </p>
         <div class="hero-actions" aria-label="Primary actions">
           <a class="button button-primary" href="#install">Install</a>
@@ -62,27 +56,12 @@ $ nstack setup
 $ nstack devexec "await apiJson('/status')"
 $ nstack deploy</code></pre>
         </div>
-        <dl class="runtime-strip">
-          <div>
-            <dt>Status</dt>
-            <dd>{{ statusLabel }}</dd>
-          </div>
-          <div>
-            <dt>Commit</dt>
-            <dd>{{ commitLabel }}</dd>
-          </div>
-          <div>
-            <dt>Target</dt>
-            <dd>Dokploy</dd>
-          </div>
-        </dl>
       </aside>
     </section>
 
     <section id="install" class="install-band">
       <div class="section-heading">
-        <p class="eyebrow">Fresh machine path</p>
-        <h2>Install once, then let setup fill the gaps.</h2>
+        <h2>Install nstack, then set up each app.</h2>
       </div>
       <div class="install-command">
         <code>{{ installCommand }}</code>
@@ -91,63 +70,50 @@ $ nstack deploy</code></pre>
         </button>
       </div>
       <p class="note">
-        The installer creates a user-owned checkout, activates pnpm with
-        Corepack when needed, and links the CLI into <code>~/.local/bin</code>.
-        Generated apps use <code>nstack setup</code> to install dependencies,
-        bootstrap pnpm and Encore CLI, and check Docker only when declared
-        resources need it.
+        The installer links the CLI into <code>~/.local/bin</code>. In a
+        generated app, <code>nstack setup</code> installs dependencies, adds the
+        Encore CLI if needed, and checks Docker only when local resources need
+        it.
       </p>
     </section>
 
     <section id="workflow" class="workflow-grid" aria-label="nstack workflow">
       <article>
-        <span class="kicker">01</span>
-        <h3>Local dev</h3>
+        <h3>Dev server</h3>
         <p>
-          One command runs Encore, Nuxt, and generated-client watching. AI
-          harnesses use <code>nstack devexec</code> for one-shot checks instead
-          of leaving dev servers behind.
+          <code>nstack dev</code> starts Encore, Nuxt, and client sync. Agents
+          can use <code>nstack devexec</code> for one request and exit.
         </p>
       </article>
       <article>
-        <span class="kicker">02</span>
-        <h3>Typed frontend API</h3>
+        <h3>Typed API calls</h3>
         <p>
-          The Encore client is generated from local metadata and patched for
-          nstack/Dokploy targets, so the frontend does not depend on Encore
-          Cloud environments.
+          Nuxt calls Encore through a generated client, so route and parameter
+          changes show up in TypeScript.
         </p>
       </article>
       <article>
-        <span class="kicker">03</span>
-        <h3>Proper resources</h3>
+        <h3>Encore resources</h3>
         <p>
-          New features are expected to use idiomatic Encore and Nuxt
-          abstractions: APIs, generated clients, databases, caches, Pub/Sub,
-          WebSockets, and other resources where they fit.
+          Use Encore APIs, databases, caches, Pub/Sub, WebSockets, and buckets
+          when a feature needs them.
         </p>
       </article>
     </section>
 
     <section id="deploy" class="deploy-band">
       <div class="deploy-copy">
-        <p class="eyebrow">Dokploy-first</p>
-        <h2>Production, staging, and previews use nstack targets.</h2>
+        <h2>Deploy the current app.</h2>
         <p>
-          The website itself is configured for
-          <strong>nstack.playground.nik.technology</strong>. Source deployment
-          reads the generated Compose file from this repository and builds from
-          the website app directory.
+          Run <code>nstack deploy</code> from a generated app, or pass
+          <code>--cwd</code> for a monorepo subdirectory. Use targets for
+          staging and preview deploys.
         </p>
       </div>
-      <div class="deploy-map" aria-label="Deployment map">
-        <div class="map-node strong">nstack deploy</div>
-        <div class="map-line"></div>
-        <div class="map-node">render Compose</div>
-        <div class="map-line"></div>
-        <div class="map-node">push source</div>
-        <div class="map-line"></div>
-        <div class="map-node strong">Dokploy</div>
+      <div class="deploy-panel" aria-label="Deploy commands">
+        <pre><code>$ nstack deploy
+$ nstack deploy --cwd apps/web
+$ nstack deploy --env staging</code></pre>
       </div>
     </section>
   </main>
@@ -239,16 +205,6 @@ $ nstack deploy</code></pre>
 
 .hero-copy {
   max-width: 760px;
-}
-
-.eyebrow,
-.kicker {
-  margin: 0 0 14px;
-  color: #0b6b4f;
-  font-size: 12px;
-  font-weight: 850;
-  text-transform: uppercase;
-  letter-spacing: 0;
 }
 
 h1,
@@ -365,37 +321,10 @@ code {
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
 
-.runtime-strip {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  margin: 22px 0 0;
-}
-
-.runtime-strip div,
 .workflow-grid article {
   border: 1px solid rgba(23, 23, 23, 0.18);
   border-radius: 8px;
   background: #ffffff;
-}
-
-.runtime-strip div {
-  padding: 13px;
-}
-
-.runtime-strip dt {
-  color: #686868;
-  font-size: 12px;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.runtime-strip dd {
-  margin: 6px 0 0;
-  overflow: hidden;
-  font-weight: 850;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .install-band,
@@ -473,32 +402,16 @@ code {
   max-width: 740px;
 }
 
-.deploy-map {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 38px minmax(0, 1fr) 38px minmax(0, 1fr) 38px minmax(0, 1fr);
-  align-items: center;
-}
-
-.map-node {
-  display: grid;
-  min-height: 92px;
-  place-items: center;
+.deploy-panel {
   border: 1px solid #171717;
   border-radius: 8px;
-  background: #ffffff;
-  padding: 14px;
-  text-align: center;
-  font-weight: 850;
+  background: #111111;
+  box-shadow: 10px 10px 0 #d8f14f;
+  overflow: hidden;
 }
 
-.map-node.strong {
-  background: #171717;
-  color: #ffffff;
-}
-
-.map-line {
-  height: 2px;
-  background: #b42318;
+.deploy-panel pre {
+  color: #e8f7ef;
 }
 
 @media (max-width: 900px) {
@@ -526,26 +439,11 @@ code {
     grid-template-columns: 1fr;
   }
 
-  .deploy-map {
-    grid-template-columns: 1fr;
-    gap: 10px;
-  }
-
-  .map-line {
-    width: 2px;
-    height: 26px;
-    justify-self: center;
-  }
 }
 
 @media (max-width: 560px) {
-  .runtime-strip,
   .install-command {
     grid-template-columns: 1fr;
-  }
-
-  .runtime-strip {
-    display: grid;
   }
 
   .install-command {
