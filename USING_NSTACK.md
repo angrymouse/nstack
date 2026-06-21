@@ -233,7 +233,7 @@ Interactive `nstack init` asks whether to set up Dokploy deployment now. If you 
 
 Init asks which package manager to use, with pnpm as the default when it is available. The Encore + Nuxt template currently supports pnpm. You can let nstack remember pnpm as the default for future projects, or pass `--package-manager pnpm` / set `NSTACK_PACKAGE_MANAGER=pnpm` in automation.
 
-Init also runs `pnpm install` and `pnpm approve-builds --all`, initializes git in the generated app, creates the first commit with message `init`, and sets `origin` to the configured repository URL when one is known. If you add the repository later with `nstack configure --repository <git-url>`, nstack sets `origin` when the repo does not already have one. On cloned or manually copied apps, `nstack setup` performs the local setup work without scaffolding a new app.
+Init also runs `pnpm install` and `pnpm approve-builds --all`, initializes git when needed, creates the first commit with message `init`, and sets `origin` to the configured repository URL when one is known. If you run init inside an existing worktree, nstack does not create a nested repo; it commits only the generated app directory into the parent worktree. If you add the repository later with `nstack configure --repository <git-url>`, nstack sets `origin` when the repo does not already have one. On cloned or manually copied apps, `nstack setup` performs the local setup work without scaffolding a new app.
 
 For automation or a scaffold-only run, use:
 
@@ -343,6 +343,8 @@ export default {
 ```
 
 Use `githubId`, `gitlabId`, `bitbucketId`, or `giteaId` to pin a specific Dokploy provider. For plain Git, use `sourceType: "git"` and `sshKeyId: "<dokploy-ssh-key-id>"` for private SSH repositories.
+
+Monorepos with multiple nstack apps are supported. Run commands from the app directory or pass `--cwd apps/web`; nstack scopes source-backed dirty checks, generated artifact commits, local `.nstack` state, and client generation to that one app. When the app is in a Git subdirectory and you have not set `composePath` or `watchPaths`, nstack defaults Dokploy source settings to the app path, for example `apps/web/deploy/nstack/compose.dokploy.yaml` and `["apps/web/**"]`. Override those fields only for custom layouts.
 
 ### 11. Add Runtime Secrets If Needed
 
@@ -584,7 +586,7 @@ git push
 nstack deploy
 ```
 
-For Compose source builds, the Dokploy server builds from Git. Before a deploy, nstack commits generated `deploy/nstack` artifacts and pushes the current repo to the configured repository and branch. If the remote repository does not exist or git credentials cannot push to it, create a private repository on GitHub, GitLab, Bitbucket, or Gitea/Forgejo and push the app first:
+For Compose source builds, the Dokploy server builds from Git. Before a deploy, nstack commits generated `deploy/nstack` artifacts for the current app and pushes the current repo to the configured repository and branch. In a monorepo, sibling app changes do not block deploys for the app you are deploying. If the remote repository does not exist or git credentials cannot push to it, create a private repository on GitHub, GitLab, Bitbucket, or Gitea/Forgejo and push the app first:
 
 ```sh
 git remote add origin <git-url>   # only if origin is missing

@@ -1283,7 +1283,7 @@ async function completeDeployConfig(config, cwd, options) {
     const source = await completeSourceConfig({
       buildMode,
       localOnly,
-      source: sourceConfigFromOptions(config.deploy.source || {}, options),
+      source: sourceConfigWithAppDefaults(sourceConfigFromOptions(config.deploy.source || {}, options), cwd),
       repository,
       branch,
       url,
@@ -1354,6 +1354,27 @@ function sourceConfigFromOptions(existing, options) {
     sshKeyId: options.sshKeyId || existing.sshKeyId || "",
     composePath: options.composePath || existing.composePath || "",
     watchPaths: optionList(options.watchPaths, existing.watchPaths || []),
+  };
+}
+
+function sourceConfigWithAppDefaults(source, cwd) {
+  const defaults = sourcePathDefaultsForApp(cwd);
+  if (!defaults.composePath && defaults.watchPaths.length === 0) return source;
+  return {
+    ...source,
+    composePath: source.composePath || defaults.composePath,
+    watchPaths: source.watchPaths.length ? source.watchPaths : defaults.watchPaths,
+  };
+}
+
+function sourcePathDefaultsForApp(cwd) {
+  const context = gitAppContext(cwd);
+  if (!context.inWorktree || context.appPath === ".") {
+    return { composePath: "", watchPaths: [] };
+  }
+  return {
+    composePath: joinGitPath(context.appPath, generatedDir, "compose.dokploy.yaml"),
+    watchPaths: [`${context.appPath}/**`],
   };
 }
 
@@ -1910,11 +1931,14 @@ function isLocalNstackPath(file) {
 }
 
 function gitPorcelainPaths(cwd) {
-  const text = safeOutput("git", ["status", "--porcelain", "--untracked-files=all"], cwd);
+  const context = gitAppContext(cwd);
+  const text = safeOutput("git", ["status", "--porcelain", "--untracked-files=all", "--", "."], cwd);
   return text.split(/\r?\n/)
     .map((line) => line.slice(3).trim())
     .filter(Boolean)
-    .map((file) => file.includes(" -> ") ? file.split(" -> ").pop().trim() : file);
+    .map((file) => file.includes(" -> ") ? file.split(" -> ").pop().trim() : file)
+    .map((file) => appRelativeGitPath(context, file))
+    .filter(Boolean);
 }
 
 function isGeneratedDeployPath(file) {
@@ -1934,6 +1958,33 @@ function safeOutput(command, args, cwd) {
   } catch {
     return "";
   }
+}
+
+function gitAppContext(cwd) {
+  const root = safeOutput("git", ["rev-parse", "--show-toplevel"], cwd).trim();
+  if (!root) return { inWorktree: false, root: cwd, appPath: "." };
+  const appPath = normalizeGitPath(path.relative(root, cwd)) || ".";
+  return { inWorktree: true, root, appPath };
+}
+
+function appRelativeGitPath(context, file) {
+  const normalized = normalizeGitPath(file);
+  if (!normalized) return "";
+  if (!context.inWorktree || context.appPath === ".") return normalized;
+  const prefix = `${context.appPath}/`;
+  if (normalized === context.appPath) return ".";
+  return normalized.startsWith(prefix) ? normalized.slice(prefix.length) : "";
+}
+
+function normalizeGitPath(file) {
+  return String(file || "").replaceAll(path.sep, "/").replace(/^\.\/+/, "").replace(/\/+$/, "");
+}
+
+function joinGitPath(...parts) {
+  return parts
+    .map((part) => normalizeGitPath(part))
+    .filter(Boolean)
+    .join("/");
 }
 
 function imageNames(config, release) {

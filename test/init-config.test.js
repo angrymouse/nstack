@@ -257,6 +257,28 @@ test("init next steps enter the generated project directory", async () => {
   }
 });
 
+test("init inside an existing worktree commits the app without creating a nested repo", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "nstack-init-monorepo-"));
+  const target = path.join(root, "apps", "web");
+  execFileSync("git", ["init"], { cwd: root, stdio: "ignore" });
+  execFileSync("git", ["checkout", "-B", "main"], { cwd: root, stdio: "ignore" });
+  execFileSync("git", ["config", "user.email", "nstack@example.test"], { cwd: root });
+  execFileSync("git", ["config", "user.name", "nstack"], { cwd: root });
+  writeFileSync(path.join(root, "README.md"), "# monorepo\n");
+  execFileSync("git", ["add", "README.md"], { cwd: root });
+  execFileSync("git", ["commit", "-m", "initial root"], { cwd: root, stdio: "ignore" });
+
+  await runCli(["init", target, "--yes", "--skip-install"]);
+
+  assert.equal(existsSync(path.join(target, ".git")), false);
+  assert.equal(execFileSync("git", ["-C", root, "log", "-1", "--pretty=%s"], { encoding: "utf8" }).trim(), "init");
+  assert.equal(execFileSync("git", ["-C", root, "status", "--short", "--untracked-files=all"], { encoding: "utf8" }).trim(), "");
+  assert.match(
+    execFileSync("git", ["-C", root, "show", "--name-only", "--format=", "HEAD"], { encoding: "utf8" }),
+    /apps\/web\/nstack\.config\.mjs/,
+  );
+});
+
 test("configure persists provider-specific source settings non-interactively", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "nstack-configure-source-"));
   const target = path.join(cwd, "app");

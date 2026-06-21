@@ -51,6 +51,11 @@ Before changing code, read [NSTACK_GUIDELINES.md](./NSTACK_GUIDELINES.md).
   reconcile Dokploy from Encore metadata.
 - If multiple local deploy targets exist, interactive `nstack deploy` asks for
   the environment. Use `--env <name>` in automation.
+- This app can live in a monorepo. Run commands from this app directory or pass
+  `--cwd <app-dir>`; nstack scopes generated deploy artifacts, client sync, and
+  source-backed Git dirty checks to this app. Subdirectory source-backed deploys
+  default to app-prefixed Dokploy `composePath` and `watchPaths`, so sibling
+  nstack apps in the same repo do not block each other.
 - Use `nstack env set`, `nstack env pull`, and `nstack env push` for runtime
   secrets. Never commit secret values.
 - Keep generated deploy files and `.nstack/` state out of manual edits.

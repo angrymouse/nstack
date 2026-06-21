@@ -17,6 +17,13 @@ Dokploy Compose app, syncs schedules/domains, and verifies the deployment.
 When multiple local deploy targets exist, interactive `nstack deploy` asks which
 environment to deploy. Automation should pass `--env <name>`.
 
+This app may live inside a larger monorepo. Run nstack commands from the app
+directory or pass `--cwd <app-dir>`; generated deploy files, client sync,
+`.nstack` state, and source-backed Git dirty checks are scoped to that app. If
+the app is in a Git subdirectory and `composePath`/`watchPaths` are not set,
+nstack defaults Dokploy source settings to the app path, for example
+`apps/web/deploy/nstack/compose.dokploy.yaml` and `["apps/web/**"]`.
+
 Do not edit `deploy/nstack/encore.infra.json` or
 `deploy/nstack/compose.dokploy.yaml` directly. Change app code or
 `nstack.config.mjs`, then run `nstack deploy`.

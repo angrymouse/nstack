@@ -67,6 +67,12 @@ which environment to deploy. Automation should pass `--env <name>`.
 Deploy settings live in `.nstack/local.env`. App runtime secrets live in
 `.nstack/secrets.env`.
 
+This app can live in a monorepo without a nested Git repository. Run commands
+from the app directory or pass `--cwd <app-dir>`; nstack scopes generated deploy
+artifacts, client sync, local `.nstack` state, and source-backed Git dirty checks
+to this app. For subdirectory source-backed deploys, nstack defaults Dokploy
+`composePath` and `watchPaths` to the app path unless you override them.
+
 For deploy-on-push, connect the matching Git provider in Dokploy first. nstack
 can configure provider-backed Compose sources for GitHub, GitLab, Bitbucket, and
 Gitea/Forgejo. Use `deploy.source` in `nstack.config.mjs` for advanced provider

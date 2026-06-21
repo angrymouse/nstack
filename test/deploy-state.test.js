@@ -1671,6 +1671,100 @@ writeFileSync(path.join(root, "frontend", "app", "generated", "encore-client.ts"
   assert.equal(env.NSTACK_GIT_COMMIT, deployCall.body.description.replace(/^Deploy /, ""));
 });
 
+test("deploy scopes source-backed Git checks to one app in a monorepo", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "nstack-source-monorepo-"));
+  const cwd = path.join(root, "apps", "web");
+  const sibling = path.join(root, "apps", "admin");
+  const remote = path.join(root, "remote.git");
+  mkdirSync(path.join(cwd, "backend", "api"), { recursive: true });
+  mkdirSync(path.join(cwd, "frontend"), { recursive: true });
+  mkdirSync(sibling, { recursive: true });
+  writeFileSync(path.join(cwd, ".gitignore"), ".nstack\nnode_modules\n");
+  writeFileSync(path.join(cwd, "nstack.config.mjs"), `export default {
+  app: { name: "Mono Web", slug: "mono-web" },
+  deploy: {
+    buildMode: "compose",
+    source: {
+      sourceType: "gitea",
+      repository: "git@git.example.test:acme/mono.git",
+      branch: "main",
+      giteaId: "gitea-1"
+    }
+  },
+  verify: { endpoints: [] },
+};\n`);
+  writeFileSync(path.join(cwd, "backend", "api", "status.ts"), `export const ok = true;\n`);
+  writeFileSync(path.join(cwd, "backend", "Dockerfile"), "FROM scratch\n");
+  writeFileSync(path.join(cwd, "frontend", "Dockerfile"), "FROM scratch\n");
+  writeFileSync(path.join(sibling, "status.txt"), "clean\n");
+  execFileSync("git", ["init", "--bare", remote], { stdio: "ignore" });
+  execFileSync("git", ["init"], { cwd: root, stdio: "ignore" });
+  execFileSync("git", ["config", "user.email", "nstack@example.test"], { cwd: root });
+  execFileSync("git", ["config", "user.name", "nstack"], { cwd: root });
+  execFileSync("git", ["branch", "-M", "main"], { cwd: root });
+  execFileSync("git", ["remote", "add", "origin", remote], { cwd: root });
+  execFileSync("git", ["add", "."], { cwd: root });
+  execFileSync("git", ["commit", "-m", "initial"], { cwd: root, stdio: "ignore" });
+  writeFileSync(path.join(sibling, "status.txt"), "dirty sibling\n");
+
+  const envKeys = ["NSTACK_DOMAIN", "DOKPLOY_URL", "DOKPLOY_API_KEY"];
+  const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+  process.env.NSTACK_DOMAIN = "mono-web.example.test";
+  process.env.DOKPLOY_URL = "https://dokploy.example.test";
+  process.env.DOKPLOY_API_KEY = "dummy";
+
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    const parsed = new URL(String(url));
+    const endpoint = parsed.pathname.replace(/^\/api\/(?:trpc\/)?/, "");
+    const body = init.body ? JSON.parse(init.body) : null;
+    calls.push({ endpoint, method: init.method || "GET", body });
+    if ((init.method || "GET") === "GET") {
+      if (endpoint === "gitProvider.getAll") {
+        return Response.json({ json: [{ providerType: "gitea", gitea: { giteaId: "gitea-1", giteaUrl: "https://git.example.test", isConfigured: true } }] });
+      }
+      if (endpoint === "gitea.giteaProviders") return Response.json({ json: [{ giteaId: "gitea-1" }] });
+      if (endpoint === "project.all" || endpoint === "environment.byProjectId" || endpoint === "compose.search" || endpoint === "domain.byComposeId" || endpoint === "schedule.list") {
+        return Response.json({ json: [] });
+      }
+      if (endpoint === "settings.getIp") return Response.json({ json: "203.0.113.10" });
+    }
+    if (endpoint === "domain.validateDomain") return Response.json({ json: { isValid: true, resolvedIp: "203.0.113.10" } });
+    const ids = {
+      "project.create": { projectId: "project-1" },
+      "environment.create": { environmentId: "environment-1" },
+      "compose.create": { composeId: "compose-1" },
+      "domain.create": { domainId: "domain-1" },
+    };
+    return Response.json({ json: ids[endpoint] || {} });
+  };
+
+  try {
+    await deploy({ cwd, noWait: true, skipVerify: true, skipStatus: true, yes: true });
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const key of envKeys) {
+      if (originalEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = originalEnv[key];
+    }
+  }
+
+  const update = calls.find((call) => call.endpoint === "compose.update");
+  assert.equal(update.body.composePath, "apps/web/deploy/nstack/compose.dokploy.yaml");
+  assert.deepEqual(update.body.watchPaths, ["apps/web/**"]);
+  const save = calls.find((call) => call.endpoint === "compose.saveEnvironment");
+  const env = Object.fromEntries(save.body.env.trim().split("\n").map((line) => {
+    const index = line.indexOf("=");
+    return [line.slice(0, index), line.slice(index + 1)];
+  }));
+  assert.equal(env.NSTACK_BUILD_CONTEXT, "../..");
+  assert.match(readFileSync(path.join(cwd, ".nstack", "local.env"), "utf8"), /NSTACK_COMPOSE_PATH=apps\/web\/deploy\/nstack\/compose\.dokploy\.yaml/);
+  assert.match(readFileSync(path.join(cwd, ".nstack", "local.env"), "utf8"), /NSTACK_WATCH_PATHS=apps\/web\/\*\*/);
+  assert.match(execFileSync("git", ["show", "--name-only", "--format=", "HEAD"], { cwd: root, encoding: "utf8" }), /apps\/web\/deploy\/nstack\/compose\.dokploy\.yaml/);
+  assert.equal(execFileSync("git", ["status", "--short", "--", "apps/admin"], { cwd: root, encoding: "utf8" }).trim(), "M apps/admin/status.txt");
+});
+
 test("deploy aborts source-backed deploy when app change commit is declined", async () => {
   const root = mkdtempSync(path.join(tmpdir(), "nstack-source-dirty-decline-"));
   const cwd = path.join(root, "app");

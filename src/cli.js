@@ -265,7 +265,12 @@ function installGeneratedDependencies(cwd, options = {}, packageManager) {
 }
 
 function ensureInitialGitCommit(cwd, localEnv = {}) {
-  if (fileExists(path.join(cwd, ".git"))) return;
+  const existingRoot = gitWorktreeRoot(cwd);
+  if (existingRoot) {
+    if (path.resolve(existingRoot) === path.resolve(cwd) && fileExists(path.join(cwd, ".git"))) return;
+    commitInitialAppInExistingWorktree(cwd, existingRoot, localEnv);
+    return;
+  }
 
   const branch = localEnv.NSTACK_BRANCH || "main";
   run("git", ["init"], { cwd, capture: true });
@@ -281,6 +286,40 @@ function ensureInitialGitCommit(cwd, localEnv = {}) {
     capture: true,
     env: gitCommitEnv(),
   });
+}
+
+function commitInitialAppInExistingWorktree(cwd, gitRoot, localEnv = {}) {
+  const appPath = normalizeGitPath(path.relative(gitRoot, cwd)) || ".";
+  if (localEnv.NSTACK_REPOSITORY) ensureGitOriginInWorktree(gitRoot, localEnv.NSTACK_REPOSITORY);
+  run("git", ["add", "--", appPath], { cwd: gitRoot, capture: true });
+  const staged = commandOutput("git", ["diff", "--cached", "--name-only", "--", appPath], { cwd: gitRoot }).trim();
+  if (!staged) return;
+  run("git", ["commit", "-m", "init"], {
+    cwd: gitRoot,
+    capture: true,
+    env: gitCommitEnv(),
+  });
+}
+
+function ensureGitOriginInWorktree(gitRoot, repository) {
+  const origin = safeGitOutput(["remote", "get-url", "origin"], gitRoot);
+  if (!origin) run("git", ["remote", "add", "origin", repository], { cwd: gitRoot, capture: true });
+}
+
+function gitWorktreeRoot(cwd) {
+  return safeGitOutput(["rev-parse", "--show-toplevel"], cwd);
+}
+
+function safeGitOutput(args, cwd) {
+  try {
+    return commandOutput("git", args, { cwd }).trim();
+  } catch {
+    return "";
+  }
+}
+
+function normalizeGitPath(file) {
+  return String(file || "").replaceAll(path.sep, "/").replace(/^\.\/+/, "").replace(/\/+$/, "");
 }
 
 function ensureClaudeSymlink(cwd) {

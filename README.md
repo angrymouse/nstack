@@ -19,9 +19,11 @@ Encore + Nuxt template currently supports pnpm and can remember it as the
 default for new projects. In CI, use `nstack configure` with flags or env vars
 for the same settings.
 
-`nstack init` initializes a git repository, creates the initial `init` commit,
-and sets `origin` when a repository URL is configured. Before that commit, it
-runs `pnpm install` and `pnpm approve-builds --all`, so the lockfile and pnpm
+`nstack init` initializes a git repository when needed, creates the initial
+`init` commit, and sets `origin` when a repository URL is configured. If the app
+is created inside an existing worktree, nstack does not create a nested repo; it
+commits only the new app directory into the parent worktree. Before that commit,
+it runs `pnpm install` and `pnpm approve-builds --all`, so the lockfile and pnpm
 build approvals are part of the first commit. Source-backed deploys push the
 current repo before asking Dokploy to build it. When the backing Git repository
 needs to be created first, nstack treats a private repository as the default.
@@ -168,3 +170,11 @@ files such as `.nstack/local.staging.env`, `.nstack/secrets.staging.env`, and
 `.nstack/state.staging.json`. If multiple local targets exist, interactive
 `nstack deploy` asks which environment to deploy; automation should pass
 `--env <name>`.
+
+Monorepos are supported without repo-in-repo layouts. Run nstack from the app
+directory, for example `nstack deploy --cwd apps/web`; nstack scopes dirty Git
+checks, generated deploy artifact commits, and client generation to that app.
+For source-backed Dokploy deploys, subdirectory apps default to app-prefixed
+Compose source settings such as `apps/web/deploy/nstack/compose.dokploy.yaml`
+and `watchPaths: ["apps/web/**"]`, so multiple nstack apps can share one
+repository without blocking each other.

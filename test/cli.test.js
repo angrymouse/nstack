@@ -326,9 +326,9 @@ test("cli reports version in text and json modes", async () => {
     console.log = originalLog;
   }
 
-  assert.equal(output[0], "nstack 0.1.1");
-  assert.deepEqual(JSON.parse(output[1]), { name: "nstack", version: "0.1.1" });
-  assert.equal(output[2], "nstack 0.1.1");
+  assert.equal(output[0], "nstack 0.1.2");
+  assert.deepEqual(JSON.parse(output[1]), { name: "nstack", version: "0.1.2" });
+  assert.equal(output[2], "nstack 0.1.2");
 });
 
 test("--ci fails instead of prompting for missing deploy settings", async () => {
