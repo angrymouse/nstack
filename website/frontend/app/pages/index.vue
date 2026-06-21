@@ -61,7 +61,7 @@ $ nstack deploy</code></pre>
 
     <section id="install" class="install-band">
       <div class="section-heading">
-        <h2>Install nstack, then set up each app.</h2>
+        <h2>Install nstack</h2>
       </div>
       <div class="install-command">
         <code>{{ installCommand }}</code>
@@ -70,10 +70,8 @@ $ nstack deploy</code></pre>
         </button>
       </div>
       <p class="note">
-        The installer links the CLI into <code>~/.local/bin</code>. In a
-        generated app, <code>nstack setup</code> installs dependencies, adds the
-        Encore CLI if needed, and checks Docker only when local resources need
-        it.
+        For a cloned generated app, run <code>nstack setup</code> before
+        <code>nstack dev</code> or <code>nstack deploy</code>.
       </p>
     </section>
 

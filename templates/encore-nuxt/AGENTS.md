@@ -59,6 +59,10 @@ Before changing code, read [NSTACK_GUIDELINES.md](./NSTACK_GUIDELINES.md).
   line should tell the user what the product is, what they can do, what changed,
   or what command to run. Replace buzzphrases such as `Ship from the directory
   you already use` with concrete wording that names the real action.
+  Do not dress an obvious instruction up as product copy. Plain wording such as
+  `Install nstack` is better than a sentence that tries to sound pragmatic but
+  adds no new information. If a line only restates what the user already knows,
+  delete it or replace it with the next useful action.
 - For new features, prefer idiomatic Encore and Nuxt abstractions over legacy
   local conventions: Encore APIs and generated clients, SQL databases, caches,
   Pub/Sub topics, WebSockets, and other Encore resources where they fit. Follow

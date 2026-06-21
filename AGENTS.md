@@ -45,6 +45,10 @@ For website and frontend copy, check every visible line after editing. Each line
 should tell the user what the product is, what they can do, what changed, or what
 command to run. Replace buzzphrases such as `Ship from the directory you already
 use` with concrete wording that names the real action.
+Do not dress an obvious instruction up as product copy. Plain wording such as
+`Install nstack` is better than a sentence that tries to sound pragmatic but
+adds no new information. If a line only restates what the user already knows,
+delete it or replace it with the next useful action.
 
 ## Template Documentation Maintenance
 

@@ -64,6 +64,9 @@ Before changing code, read [NSTACK_GUIDELINES.md](./NSTACK_GUIDELINES.md).
 - Check every visible line of website copy after editing. Each line should tell
   the user what nstack is, what they can do, what changed, or what command to
   run. Replace buzzphrases with concrete wording that names the real action.
+- Do not dress an obvious instruction up as product copy. Plain wording such as
+  `Install nstack` is better than a sentence that tries to sound pragmatic but
+  adds no new information.
 - Use `nstack env set`, `nstack env pull`, and `nstack env push` for runtime
   secrets. Never commit secret values.
 - Keep generated deploy files and `.nstack/` state out of manual edits.
