@@ -5,7 +5,7 @@
     "env_name": "prod",
     "env_type": "production",
     "cloud": "local",
-    "base_url": "https://nstack.playground.nik.technology/api"
+    "base_url": "https://nstack.tech/api"
   },
   "graceful_shutdown": {
     "total": 30
@@ -18,7 +18,7 @@
   ],
   "cors": {
     "allow_origins_with_credentials": [
-      "https://nstack.playground.nik.technology"
+      "https://nstack.tech"
     ],
     "allow_headers": [
       "Authorization",
