@@ -32,6 +32,7 @@ RUN --mount=type=cache,id=nstack-frontend-nuxt,target=/workspace/node_modules/.c
   --mount=type=cache,id=nstack-frontend-dotnuxt,target=/workspace/frontend/.nuxt \
   --mount=type=cache,id=nstack-frontend-vite,target=/workspace/frontend/node_modules/.cache/vite \
   --mount=type=cache,id=nstack-frontend-jiti,target=/workspace/frontend/node_modules/.cache/jiti \
+  NODE_OPTIONS=--experimental-sqlite \
   NITRO_PRESET=node-server \
   ./node_modules/.bin/nuxt build --logLevel=silent
 
