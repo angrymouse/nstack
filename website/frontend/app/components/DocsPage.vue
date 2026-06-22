@@ -31,7 +31,14 @@ const currentPath = computed(() => {
 
 const { data: page } = await useAsyncData(
   "docs-page",
-  () => queryCollection("content").path(currentPath.value).first(),
+  async () => {
+    const primary = await queryCollection("content").path(currentPath.value).first();
+    if (primary) return primary;
+    if (currentPath.value === "/docs") {
+      return queryCollection("content").path("/docs/index").first();
+    }
+    return null;
+  },
   {
     watch: [currentPath],
   },
