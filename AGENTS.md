@@ -6,6 +6,11 @@ This repository builds the `nstack` CLI and project templates.
 
 Bump the package version in `package.json` for every repository change or commit.
 
+## File Handling
+
+Do not read large files during regular edits. Use targeted reads and exact
+symbol or line-range checks instead to avoid over-aggressive summarization.
+
 ## Prose Style
 
 Avoid binary contrast phrasing in prose, web design, reasoning, and

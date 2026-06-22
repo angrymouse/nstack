@@ -44,10 +44,11 @@ function errorText(error) {
 }
 
 function parseDevExecArgs(argv) {
+  const fallbackFrontendPort = getFrontendPortFallback();
   const options = {
     code: "",
     file: "",
-    frontendURL: cleanBaseURL(process.env.NSTACK_DEV_FRONTEND_URL || "http://localhost:3000"),
+    frontendURL: cleanBaseURL(process.env.NSTACK_DEV_FRONTEND_URL || `http://localhost:${fallbackFrontendPort}`),
     frontendURLExplicit: Boolean(process.env.NSTACK_DEV_FRONTEND_URL),
     backendURL: cleanBaseURL(process.env.NSTACK_DEV_BACKEND_URL || "http://localhost:4000"),
     backendURLExplicit: Boolean(process.env.NSTACK_DEV_BACKEND_URL),
@@ -106,7 +107,7 @@ function parseDevExecArgs(argv) {
 
 async function prepareDevStackOptions(options) {
   options.backendURL = await prepareManagedURL(options.backendURL, 4000, options.backendURLExplicit, "Encore backend", "--backend-url");
-  options.frontendURL = await prepareManagedURL(options.frontendURL, 3000, options.frontendURLExplicit, "Nuxt frontend", "--frontend-url");
+  options.frontendURL = await prepareManagedURL(options.frontendURL, getFrontendPortFallback(), options.frontendURLExplicit, "Nuxt frontend", "--frontend-url");
   if (!options.apiURLExplicit) options.apiURL = options.backendURL;
   if (!options.waitURLExplicit) options.waitURL = options.frontendURL;
 }
@@ -141,7 +142,7 @@ function isPortAvailable(port) {
 
 function startDevStack(options) {
   const backendPort = urlPort(options.backendURL, 4000);
-  const frontendPort = urlPort(options.frontendURL, 3000);
+  const frontendPort = urlPort(options.frontendURL, getFrontendPortFallback());
   spawnManaged("backend", "pnpm", ["--dir", "backend", "dev"], {
     ENCORE_LOCAL_PORT: String(backendPort),
   });
@@ -162,6 +163,11 @@ function startDevStack(options) {
     NUXT_API_INTERNAL_BASE_URL: options.apiURL,
     NSTACK_API_BASE_URL: options.apiURL,
   });
+}
+
+function getFrontendPortFallback() {
+  const paseoPort = Number(process.env.PASEO_PORT);
+  return Number.isFinite(paseoPort) && paseoPort > 0 ? paseoPort : 3000;
 }
 
 async function waitForDevStack(options) {
