@@ -100,6 +100,33 @@ const deployChecks = [
   "nstack owns the build and deploy handoff for each target",
 ];
 
+const resourceRows = [
+  {
+    name: "SQL databases",
+    detail: "Encore SQL databases map to Dokploy Postgres resources.",
+  },
+  {
+    name: "Caches",
+    detail: "Encore caches map to Dragonfly services.",
+  },
+  {
+    name: "Pub/Sub",
+    detail: "Topics and subscriptions map to NSQ-backed services for the deployed app.",
+  },
+  {
+    name: "Object storage",
+    detail: "Encore buckets map to RustFS buckets.",
+  },
+  {
+    name: "Cron jobs",
+    detail: "Encore cron definitions become scheduled jobs for the target.",
+  },
+  {
+    name: "Secrets",
+    detail: "Secrets are stored as target-specific deployment environment values.",
+  },
+];
+
 type CodeTone =
   | "attribute"
   | "base"
@@ -132,13 +159,13 @@ type ProjectRow =
   | {
       type: "folder";
       label: string;
-      level: 0 | 1 | 2;
+      level: 0 | 1 | 2 | 3;
     }
   | {
       type: "file";
       path: string;
       label: string;
-      level: 0 | 1 | 2;
+      level: 0 | 1 | 2 | 3;
     };
 
 const codeToneClasses: Record<CodeTone, string> = {
@@ -158,75 +185,126 @@ const codeToneClasses: Record<CodeTone, string> = {
   type: "text-teal-200",
 };
 
-const projectIndentClasses: Record<0 | 1 | 2, string> = {
+const projectIndentClasses: Record<0 | 1 | 2 | 3, string> = {
   0: "pl-2",
   1: "pl-6",
   2: "pl-10",
+  3: "pl-14",
 };
 
 const projectRows: ProjectRow[] = [
-  { type: "folder", label: "backend/", level: 0 },
-  { type: "file", label: "api.ts", path: "backend/api.ts", level: 1 },
-  { type: "folder", label: "frontend/", level: 0 },
-  { type: "folder", label: "app/", level: 1 },
+  { type: "folder", label: "my-app", level: 0 },
+  { type: "folder", label: "backend/", level: 1 },
+  { type: "folder", label: "api/", level: 2 },
+  { type: "file", label: "status.ts", path: "backend/api/status.ts", level: 3 },
+  { type: "file", label: "db.ts", path: "backend/api/db.ts", level: 3 },
+  { type: "file", label: "gateway.ts", path: "backend/api/gateway.ts", level: 3 },
+  { type: "file", label: "encore.app", path: "backend/encore.app", level: 2 },
+  { type: "folder", label: "frontend/", level: 1 },
+  { type: "folder", label: "app/", level: 2 },
   {
     type: "file",
     label: "pages/index.vue",
     path: "frontend/app/pages/index.vue",
-    level: 2,
+    level: 3,
   },
   {
     type: "file",
     label: "generated/encore-client.ts",
     path: "frontend/app/generated/encore-client.ts",
-    level: 2,
+    level: 3,
   },
-  { type: "folder", label: "deploy/nstack/", level: 0 },
   {
     type: "file",
-    label: "dokploy.yml",
-    path: "deploy/nstack/dokploy.yml",
-    level: 1,
+    label: "utils/api.ts",
+    path: "frontend/app/utils/api.ts",
+    level: 3,
   },
-  { type: "file", label: "nstack.config.mjs", path: "nstack.config.mjs", level: 0 },
-  { type: "file", label: "package.json", path: "package.json", level: 0 },
+  { type: "file", label: "nuxt.config.ts", path: "frontend/nuxt.config.ts", level: 2 },
+  { type: "file", label: "nstack.config.mjs", path: "nstack.config.mjs", level: 1 },
+  { type: "file", label: "pnpm-workspace.yaml", path: "pnpm-workspace.yaml", level: 1 },
+  { type: "file", label: "package.json", path: "package.json", level: 1 },
 ];
 
 const codeFiles: CodeFile[] = [
   {
-    path: "backend/api.ts",
-    label: "api.ts",
+    path: "backend/api/status.ts",
+    label: "status.ts",
     language: "TypeScript",
     source: `import { api } from "encore.dev/api";
+import { db } from "./db";
 
-export const health = api(
-  { expose: true, method: "GET", path: "/health" },
+interface StatusResponse {
+  app: string;
+  commit: string;
+  database_ok: boolean;
+  uptime_seconds: number;
+}
+
+export const ready = api(
+  { expose: true, method: "GET", path: "/ready" },
   async () => ({ ok: true }),
 );
 
-export const hello = api(
-  { expose: true, method: "GET", path: "/hello/:name" },
-  async ({ name }: { name: string }) => ({
-    message: \`hello \${name}\`,
-  }),
+export const status = api(
+  { expose: true, method: "GET", path: "/status" },
+  async (): Promise<StatusResponse> => {
+    const row = await db.queryRow<{ ok: number }>\`SELECT 1 AS ok\`;
+    return {
+      app: process.env.APP_ID || "my-app",
+      commit: process.env.GIT_COMMIT || "",
+      database_ok: row?.ok === 1,
+      uptime_seconds: Math.floor(process.uptime()),
+    };
+  },
 );`,
+  },
+  {
+    path: "backend/api/db.ts",
+    label: "db.ts",
+    language: "TypeScript",
+    source: `import { SQLDatabase } from "encore.dev/storage/sqldb";
+
+export const db = new SQLDatabase("app", {
+  migrations: "./migrations",
+});`,
+  },
+  {
+    path: "backend/api/gateway.ts",
+    label: "gateway.ts",
+    language: "TypeScript",
+    source: `import { Gateway } from "encore.dev/api";
+
+export const gateway = new Gateway({});`,
+  },
+  {
+    path: "backend/encore.app",
+    label: "encore.app",
+    language: "JSON",
+    source: `{
+  "id": "my-app"
+}`,
   },
   {
     path: "frontend/app/pages/index.vue",
     label: "pages/index.vue",
     language: "Vue",
     source: `<script setup lang="ts">
-import { client } from "~/generated/encore-client";
-
-const { data, pending } = await useAsyncData("hello", () =>
-  client.hello({ name: "nstack" }),
+const { data, error } = await useAsyncData("status", () =>
+  apiClient().api.status(),
 );
 </scr${"ipt"}>
 
 <template>
   <main>
-    <p v-if="pending">Loading...</p>
-    <p v-else>{{ data?.message }}</p>
+    <h1>my-app</h1>
+    <p v-if="error">API unavailable: {{ error.message }}</p>
+    <dl v-else-if="data">
+      <dt>App</dt>
+      <dd>{{ data.app }}</dd>
+      <dt>Database</dt>
+      <dd>{{ data.database_ok ? "ok" : "not ready" }}</dd>
+    </dl>
   </main>
 </template>`,
   },
@@ -234,44 +312,90 @@ const { data, pending } = await useAsyncData("hello", () =>
     path: "frontend/app/generated/encore-client.ts",
     label: "generated/encore-client.ts",
     language: "Generated TypeScript",
-    source: `// generated by nstack
-export interface HelloResponse {
-  message: string;
+    source: `// Code generated by the Encore client generator. DO NOT EDIT.
+
+export const Local = "http://localhost:4000";
+
+export function Environment(name: string): string {
+  return nstackEnvironment(name);
 }
 
-export const client = {
-  health: () => api<{ ok: boolean }>("/health"),
-  hello: (input: { name: string }) =>
-    api<HelloResponse>(\`/hello/\${input.name}\`),
-};`,
+export namespace api {
+  export interface StatusResponse {
+    app: string;
+    commit: string;
+    database_ok: boolean;
+    uptime_seconds: number;
+  }
+
+  export class ServiceClient {
+    public async status(): Promise<StatusResponse> {
+      const resp = await this.baseClient.callTypedAPI("GET", "/status");
+      return await resp.json() as StatusResponse;
+    }
+  }
+}`,
   },
   {
-    path: "deploy/nstack/dokploy.yml",
-    label: "dokploy.yml",
-    language: "YAML",
-    source: `services:
-  backend:
-    image: my-app-backend
-    env:
-      ENCORE_APP_ID: my-app
-  frontend:
-    image: my-app-frontend
-    routes:
-      - app.example.com`,
+    path: "frontend/app/utils/api.ts",
+    label: "utils/api.ts",
+    language: "TypeScript",
+    source: `import Client, { type ClientOptions } from "../generated/encore-client";
+
+export function apiBaseUrl(): string {
+  const config = useRuntimeConfig();
+  if (import.meta.server) {
+    const backendHost = process.env.NSTACK_BACKEND_HOST || "backend";
+    return config.apiServerBaseUrl || \`http://\${backendHost}:8080\`;
+  }
+  return config.public.apiBaseUrl || "/api";
+}
+
+export function apiClient(options: ClientOptions = {}): Client {
+  return new Client(apiBaseUrl(), options);
+}`,
+  },
+  {
+    path: "frontend/nuxt.config.ts",
+    label: "nuxt.config.ts",
+    language: "TypeScript",
+    source: `export default defineNuxtConfig({
+  compatibilityDate: "2025-07-15",
+  devtools: { enabled: true },
+  runtimeConfig: {
+    apiServerBaseUrl: "",
+    public: {
+      apiBaseUrl: "/api",
+    },
+  },
+});`,
   },
   {
     path: "nstack.config.mjs",
     label: "nstack.config.mjs",
     language: "JavaScript",
     source: `export default {
-  app: "my-app",
-  backend: "backend",
-  frontend: "frontend",
-  deploy: {
-    provider: "dokploy",
-    target: "production",
+  app: {
+    name: "My App",
+    slug: "my-app",
+  },
+  paths: {
+    frontendContext: ".",
+  },
+  verify: {
+    endpoints: [
+      { name: "ready", path: "/api/ready", expectStatus: 200 },
+    ],
   },
 };`,
+  },
+  {
+    path: "pnpm-workspace.yaml",
+    label: "pnpm-workspace.yaml",
+    language: "YAML",
+    source: `packages:
+  - backend
+  - frontend`,
   },
   {
     path: "package.json",
@@ -281,13 +405,13 @@ export const client = {
   "name": "my-app",
   "private": true,
   "scripts": {
-    "dev": "nstack dev",
-    "deploy": "nstack deploy"
+    "setup": "node scripts/nstack-local.mjs setup",
+    "dev": "node scripts/dev.mjs",
+    "build": "node scripts/nstack-client.mjs gen && pnpm --dir frontend build",
+    "deploy": "nstack deploy",
+    "status": "nstack status"
   },
-  "dependencies": {
-    "encore.dev": "latest",
-    "nuxt": "latest"
-  }
+  "packageManager": "pnpm@10.18.3"
 }`,
   },
 ];
@@ -678,7 +802,7 @@ useHead({
             <p class="mt-5 max-w-xl text-pretty text-[18px] font-semibold leading-8 text-zinc-400">
               nstack gives agents a real project shape: typed APIs, resource
               declarations, frontend rules, generated client code, and Dokploy
-              deployment paths that stay visible in source.
+              target config they can inspect.
             </p>
           </div>
 
@@ -713,8 +837,8 @@ useHead({
                 Start from a production-shaped app.
               </h2>
               <p class="mt-4 max-w-2xl text-[17px] font-semibold leading-8 text-zinc-400">
-                Pick a file to inspect the generated Encore API, Nuxt page,
-                typed client, deploy output, and package scripts.
+                Pick a file to inspect the Encore API, Nuxt page, generated
+                client, API helper, workspace config, and package scripts.
               </p>
             </div>
             <div class="flex items-center justify-start gap-2 md:justify-end">
@@ -729,10 +853,6 @@ useHead({
               role="tablist"
               aria-label="Generated project files"
             >
-              <div class="mb-2 flex items-center gap-2 px-2 py-1 text-[13px] font-extrabold text-zinc-200">
-                <PhFolderSimple :size="17" weight="bold" aria-hidden="true" />
-                <span>my-app</span>
-              </div>
               <template v-for="row in projectRows" :key="row.type === 'file' ? row.path : `${row.label}-${row.level}`">
                 <div
                   v-if="row.type === 'folder'"
@@ -840,6 +960,53 @@ useHead({
                 Install nstack
               </InspiraButton>
             </div>
+          </InspiraSurface>
+        </div>
+      </section>
+
+      <section id="provisioning" class="mx-auto max-w-6xl px-5 py-12 md:px-8 md:py-20">
+        <div class="grid gap-6 lg:grid-cols-[1.08fr_0.92fr] lg:items-start">
+          <InspiraSurface class="overflow-hidden">
+            <div class="border-b border-zinc-800 p-5 md:p-6">
+              <h2 class="font-display text-3xl font-extrabold text-zinc-50 md:text-4xl">
+                Resource provisioning
+              </h2>
+              <p class="mt-3 max-w-2xl text-[17px] font-semibold leading-8 text-zinc-400">
+                nstack reads Encore resource declarations and provisions the
+                matching Dokploy services for the selected target.
+              </p>
+            </div>
+            <div class="divide-y divide-zinc-800">
+              <div
+                v-for="row in resourceRows"
+                :key="row.name"
+                class="grid gap-2 p-5 md:grid-cols-[12rem_1fr] md:p-6"
+              >
+                <p class="font-display text-[17px] font-extrabold text-zinc-100">
+                  {{ row.name }}
+                </p>
+                <p class="text-[15px] font-semibold leading-6 text-zinc-400">
+                  {{ row.detail }}
+                </p>
+              </div>
+            </div>
+          </InspiraSurface>
+
+          <InspiraSurface class="p-6 md:p-8">
+            <h2 class="font-display text-3xl font-extrabold leading-tight text-zinc-50 md:text-4xl">
+              Deploy pipeline
+            </h2>
+            <p class="mt-5 text-[17px] font-semibold leading-8 text-zinc-400">
+              <code class="text-zinc-200">nstack deploy</code> discovers Encore
+              resources, renders deploy files, provisions the target in
+              Dokploy, rebuilds generated client code, deploys backend and
+              frontend services, and verifies the published URL.
+            </p>
+            <p class="mt-5 text-[17px] font-semibold leading-8 text-zinc-400">
+              If Dokploy has a Git provider connected, nstack can use that
+              source provider for deploys. Targets let the same app ship to
+              production, staging, or another Dokploy environment.
+            </p>
           </InspiraSurface>
         </div>
       </section>
