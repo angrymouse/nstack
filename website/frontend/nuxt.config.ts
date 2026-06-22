@@ -18,10 +18,6 @@ export default defineNuxtConfig({
   devtools: {
     enabled: false,
   },
-  modules: ["@vizejs/nuxt"],
-  vize: {
-    compiler: true,
-  },
   future: {
     compatibilityVersion: 4,
   },
