@@ -19,7 +19,8 @@ COPY frontend/package.json ./frontend/package.json
 
 RUN --mount=type=cache,id=nstack-frontend-pnpm,target=/pnpm/store \
   pnpm config set store-dir /pnpm/store \
-  && pnpm install --filter ./frontend... --prefer-offline --frozen-lockfile=false
+  && pnpm install --filter ./frontend... --prefer-offline --frozen-lockfile=false \
+  && pnpm approve-builds --all
 
 COPY frontend/nuxt.config.ts ./frontend/nuxt.config.ts
 
