@@ -1,461 +1,408 @@
 <script setup lang="ts">
-const installCommand = "curl -fsSL https://nstack.playground.nik.technology/install.sh | bash";
-const repoUrl = "https://git.nik.technology/angrymouse/nstack";
+import { onBeforeUnmount, ref } from "vue";
+import {
+  PhArrowRight,
+  PhBracketsCurly,
+  PhCheckCircle,
+  PhCloudArrowUp,
+  PhCode,
+  PhCopy,
+  PhFolderSimple,
+  PhGitBranch,
+  PhPlay,
+  PhStack,
+  PhTerminalWindow,
+} from "@phosphor-icons/vue";
+import InspiraButton from "~/components/inspira/ui/button/InspiraButton.vue";
+import InspiraSurface from "~/components/inspira/ui/surface/InspiraSurface.vue";
 
-const copied = ref(false);
+const installCommand =
+  "curl -fsSL https://nstack.playground.nik.technology/install.sh | bash";
+const copiedInstall = ref(false);
+let copiedTimer: ReturnType<typeof setTimeout> | undefined;
 
-async function copyInstall() {
-  if (!import.meta.client || !navigator.clipboard) return;
+const copyInstall = async () => {
   await navigator.clipboard.writeText(installCommand);
-  copied.value = true;
-  window.setTimeout(() => {
-    copied.value = false;
+  copiedInstall.value = true;
+  if (copiedTimer) clearTimeout(copiedTimer);
+  copiedTimer = setTimeout(() => {
+    copiedInstall.value = false;
   }, 1600);
-}
+};
+
+onBeforeUnmount(() => {
+  if (copiedTimer) clearTimeout(copiedTimer);
+});
+
+const quickStart = [
+  {
+    icon: PhTerminalWindow,
+    label: "Install",
+    command: installCommand,
+  },
+  {
+    icon: PhFolderSimple,
+    label: "Create",
+    command: "nstack init my-app",
+  },
+  {
+    icon: PhPlay,
+    label: "Run locally",
+    command: "cd my-app && nstack dev",
+  },
+];
+
+const workflow = [
+  {
+    icon: PhCode,
+    title: "Nuxt frontend",
+    body: "Nuxt imports the generated Encore client, so API changes show up as typed calls in the app.",
+  },
+  {
+    icon: PhBracketsCurly,
+    title: "Encore backend",
+    body: "Define APIs and resources in Encore. nstack keeps the frontend client in sync during local development.",
+  },
+  {
+    icon: PhCloudArrowUp,
+    title: "Dokploy deploy",
+    body: "Deploy provisions the Dokploy app, routes, domains, and Encore resource wiring from one CLI flow.",
+  },
+];
+
+const deployChecks = [
+  "Encore resources are discovered from source",
+  "Dokploy services are rendered into deploy files",
+  "Generated clients are synced before build and deploy",
+  "Targets can be reused for staging and production",
+];
+
+useHead({
+  title: "nstack",
+  meta: [
+    {
+      name: "description",
+      content:
+        "Create Encore and Nuxt apps with generated clients, local orchestration, and Dokploy deployment.",
+    },
+    {
+      property: "og:title",
+      content: "nstack",
+    },
+    {
+      property: "og:description",
+      content:
+        "Create Encore and Nuxt apps with generated clients, local orchestration, and Dokploy deployment.",
+    },
+  ],
+  link: [
+    {
+      rel: "preconnect",
+      href: "https://fonts.googleapis.com",
+    },
+    {
+      rel: "preconnect",
+      href: "https://fonts.gstatic.com",
+      crossorigin: "",
+    },
+    {
+      rel: "stylesheet",
+      href: "https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700;800&family=IBM+Plex+Mono:wght@500;600&family=Nunito+Sans:wght@500;600;700;800;900&display=swap",
+    },
+  ],
+});
 </script>
 
 <template>
-  <main class="site-shell">
-    <nav class="topbar" aria-label="Primary">
-      <a class="brand" href="#top" aria-label="nstack home">
-        <span class="brand-mark">ns</span>
-        <span>nstack</span>
-      </a>
-      <div class="nav-links">
-        <a href="#install">Install</a>
-        <a href="#workflow">Develop</a>
-        <a href="#deploy">Deploy</a>
-        <a :href="repoUrl">Source</a>
-      </div>
-    </nav>
+  <div class="min-h-dvh text-zinc-100">
+    <a
+      href="#main"
+      class="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-zinc-100 focus:px-4 focus:py-3 focus:font-sans focus:font-extrabold focus:text-zinc-950"
+    >
+      Skip to content
+    </a>
 
-    <section id="top" class="hero">
-      <div class="hero-copy">
-        <h1>nstack</h1>
-        <p class="lede">
-          Create an Encore + Nuxt app with a generated frontend client and
-          Dokploy deployment.
-        </p>
-        <div class="hero-actions" aria-label="Primary actions">
-          <a class="button button-primary" href="#install">Install</a>
-          <a class="button button-secondary" :href="repoUrl">View source</a>
+    <header class="sticky top-0 z-40 border-b border-zinc-800 bg-zinc-950">
+      <nav
+        class="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-4 md:px-8"
+        aria-label="Primary"
+      >
+        <a href="#main" class="flex items-center gap-3 text-zinc-50">
+          <span
+            class="grid size-9 place-items-center rounded-lg border border-zinc-700 bg-zinc-900"
+            aria-hidden="true"
+          >
+            <PhStack :size="20" weight="bold" />
+          </span>
+          <span class="font-display text-[22px] font-extrabold tracking-normal">
+            nstack
+          </span>
+        </a>
+
+        <div class="hidden items-center gap-1 md:flex">
+          <a
+            href="#workflow"
+            class="rounded-md px-3 py-2 text-[14px] font-bold text-zinc-300 transition hover:bg-zinc-900 hover:text-zinc-50"
+          >
+            Workflow
+          </a>
+          <a
+            href="#deploy"
+            class="rounded-md px-3 py-2 text-[14px] font-bold text-zinc-300 transition hover:bg-zinc-900 hover:text-zinc-50"
+          >
+            Deploy
+          </a>
+          <a
+            href="#commands"
+            class="rounded-md px-3 py-2 text-[14px] font-bold text-zinc-300 transition hover:bg-zinc-900 hover:text-zinc-50"
+          >
+            Commands
+          </a>
         </div>
-      </div>
 
-      <aside class="hero-visual" aria-label="nstack command preview">
-        <div class="terminal">
-          <div class="terminal-bar">
-            <span></span>
-            <span></span>
-            <span></span>
+        <InspiraButton as="a" href="#install" size="sm" variant="secondary">
+          Install
+        </InspiraButton>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="mx-auto grid max-w-6xl gap-10 px-5 pb-16 pt-14 md:px-8 md:pb-24 md:pt-20 lg:grid-cols-[1.05fr_0.95fr] lg:items-end">
+        <div>
+          <h1 class="max-w-3xl text-balance font-display text-5xl font-extrabold leading-[0.98] tracking-normal text-zinc-50 md:text-7xl">
+            Create Encore and Nuxt apps that deploy to Dokploy.
+          </h1>
+          <p class="mt-6 max-w-2xl text-pretty text-[19px] font-semibold leading-8 text-zinc-300 md:text-[21px]">
+            nstack creates the app, keeps the Encore client generated for Nuxt,
+            and runs the local stack with one command.
+          </p>
+
+          <div class="mt-8 flex flex-col gap-3 sm:flex-row">
+            <InspiraButton as="a" href="#install">
+              Install nstack
+              <PhArrowRight :size="18" weight="bold" aria-hidden="true" />
+            </InspiraButton>
+            <InspiraButton as="a" href="#workflow" variant="quiet">
+              See workflow
+            </InspiraButton>
           </div>
-          <pre><code>$ {{ installCommand }}
-$ nstack init my-app
-$ cd my-app
-$ nstack setup
-$ nstack dev
-$ nstack deploy</code></pre>
         </div>
-      </aside>
-    </section>
 
-    <section id="install" class="install-band">
-      <div class="section-heading">
-        <h2>Install nstack</h2>
-      </div>
-      <div class="install-command">
-        <code>{{ installCommand }}</code>
-        <button type="button" class="copy-button" @click="copyInstall">
-          {{ copied ? "Copied" : "Copy" }}
-        </button>
-      </div>
-      <p class="note">
-        Create an app with <code>nstack init my-app</code>.
-      </p>
-    </section>
+        <InspiraSurface id="install" class="p-4 md:p-5">
+          <div class="flex items-start justify-between gap-5">
+            <div>
+              <p class="text-[15px] font-extrabold text-zinc-50">Install command</p>
+              <p class="mt-1 text-[14px] font-semibold leading-6 text-zinc-400">
+                Run this once, then create an app with
+                <code class="text-zinc-200">nstack init my-app</code>.
+              </p>
+            </div>
+            <button
+              type="button"
+              class="inline-flex size-10 shrink-0 items-center justify-center rounded-md border border-zinc-700 bg-zinc-900 text-zinc-200 transition hover:border-zinc-500 hover:text-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100/70 active:translate-y-px"
+              :aria-label="copiedInstall ? 'Install command copied' : 'Copy install command'"
+              @click="copyInstall"
+            >
+              <PhCheckCircle v-if="copiedInstall" :size="19" weight="bold" />
+              <PhCopy v-else :size="19" weight="bold" />
+            </button>
+          </div>
+          <pre class="mt-5 whitespace-pre-wrap break-all rounded-lg border border-zinc-800 bg-zinc-950 p-4 text-[13px] leading-6 text-zinc-200"><code>{{ installCommand }}</code></pre>
+        </InspiraSurface>
+      </section>
 
-    <section id="workflow" class="workflow-grid" aria-label="nstack development workflow">
-      <article>
-        <h3>Local dev</h3>
-        <p>
-          <code>nstack dev</code> starts Encore and Nuxt, then keeps the
-          generated client current. Use <code>nstack devexec</code> for
-          one-shot checks from Codex or Claude Code.
-        </p>
-      </article>
-      <article>
-        <h3>Generated client</h3>
-        <p>
-          Nuxt calls Encore through the generated client. API changes show up
-          in TypeScript.
-        </p>
-      </article>
-      <article>
-        <h3>Encore resources</h3>
-        <p>
-          Use Encore APIs, databases, caches, Pub/Sub, WebSockets, and buckets
-          when a feature needs them.
-        </p>
-      </article>
-    </section>
+      <section id="commands" class="mx-auto max-w-6xl px-5 py-10 md:px-8 md:py-14">
+        <div class="grid gap-3 md:grid-cols-3">
+          <InspiraSurface
+            v-for="item in quickStart"
+            :key="item.label"
+            tone="soft"
+            class="p-5"
+          >
+            <div class="flex items-center gap-3">
+              <span class="grid size-10 place-items-center rounded-lg bg-zinc-800 text-zinc-100">
+                <component :is="item.icon" :size="21" weight="bold" />
+              </span>
+              <p class="font-display text-xl font-extrabold text-zinc-50">
+                {{ item.label }}
+              </p>
+            </div>
+            <pre class="mt-5 whitespace-pre-wrap break-all rounded-lg bg-zinc-950 p-3 text-[12px] font-semibold leading-5 text-zinc-300"><code>{{ item.command }}</code></pre>
+          </InspiraSurface>
+        </div>
+      </section>
 
-    <section id="deploy" class="deploy-band">
-      <div class="deploy-copy">
-        <h2>Deploy with Dokploy</h2>
-        <p>
-          <code>nstack deploy</code> deploys the app in the current directory.
-          In a monorepo, pass <code>--cwd apps/web</code>. Use
-          <code>--env staging</code> to deploy a staging target.
-        </p>
+      <section id="workflow" class="mx-auto max-w-6xl px-5 py-12 md:px-8 md:py-20">
+        <div class="grid gap-10 lg:grid-cols-[0.85fr_1.15fr] lg:items-start">
+          <div class="lg:sticky lg:top-28">
+            <h2 class="max-w-xl text-balance font-display text-4xl font-extrabold leading-tight text-zinc-50 md:text-5xl">
+              One workflow for local work and deployment.
+            </h2>
+            <p class="mt-5 max-w-xl text-pretty text-[18px] font-semibold leading-8 text-zinc-400">
+              The generated project is a normal Encore and Nuxt app. nstack
+              handles the glue code, client generation, and deploy target setup.
+            </p>
+          </div>
+
+          <div class="space-y-4">
+            <InspiraSurface
+              v-for="step in workflow"
+              :key="step.title"
+              tone="flat"
+              class="grid gap-5 p-5 md:grid-cols-[3.5rem_1fr] md:p-6"
+            >
+              <div class="grid size-14 place-items-center rounded-lg border border-zinc-800 bg-zinc-900 text-zinc-100">
+                <component :is="step.icon" :size="27" weight="bold" />
+              </div>
+              <div>
+                <h3 class="font-display text-2xl font-extrabold text-zinc-50">
+                  {{ step.title }}
+                </h3>
+                <p class="mt-2 text-[17px] font-semibold leading-7 text-zinc-400">
+                  {{ step.body }}
+                </p>
+              </div>
+            </InspiraSurface>
+          </div>
+        </div>
+      </section>
+
+      <section class="mx-auto max-w-6xl px-5 py-12 md:px-8 md:py-20">
+        <InspiraSurface class="grid gap-0 lg:grid-cols-[1.05fr_0.95fr]">
+          <div class="p-5 md:p-8">
+            <div class="rounded-lg border border-zinc-800 bg-zinc-950">
+              <div class="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
+                <div class="flex items-center gap-2 text-[13px] font-extrabold text-zinc-200">
+                  <PhFolderSimple :size="17" weight="bold" aria-hidden="true" />
+                  <span>my-app</span>
+                </div>
+                <code class="text-[12px] font-semibold text-zinc-500">nstack init</code>
+              </div>
+              <div class="grid gap-0 md:grid-cols-[0.8fr_1.2fr]">
+                <div class="border-b border-zinc-800 p-4 md:border-b-0 md:border-r">
+                  <div class="space-y-2 text-[13px] font-bold leading-6 text-zinc-400">
+                    <p class="text-zinc-200">backend/</p>
+                    <p class="pl-4">api.ts</p>
+                    <p class="text-zinc-200">frontend/</p>
+                    <p class="pl-4">app/</p>
+                    <p class="text-zinc-200">deploy/nstack/</p>
+                    <p>nstack.config.mjs</p>
+                  </div>
+                </div>
+                <div class="p-4">
+                  <pre class="overflow-x-auto text-[13px] font-semibold leading-7 text-zinc-300"><code>await api.health()
+
+export const hello = api(
+  { method: "GET", path: "/hello" },
+  async () => ({ message: "ready" })
+)</code></pre>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="border-t border-zinc-800 p-6 md:p-8 lg:border-l lg:border-t-0">
+            <h2 class="max-w-lg text-balance font-display text-3xl font-extrabold leading-tight text-zinc-50 md:text-4xl">
+              Start with a real app structure.
+            </h2>
+            <p class="mt-4 text-[17px] font-semibold leading-8 text-zinc-400">
+              The template includes the Encore backend, Nuxt frontend, generated
+              client location, local scripts, and deploy files nstack manages.
+            </p>
+
+            <div class="mt-7 rounded-lg border border-zinc-800 bg-zinc-950 p-4">
+              <div class="flex items-center gap-2 text-[13px] font-bold text-zinc-500">
+                <PhGitBranch :size="17" weight="bold" aria-hidden="true" />
+                <span>Generated project</span>
+              </div>
+              <pre class="mt-4 overflow-x-auto text-[13px] font-semibold leading-7 text-zinc-300"><code>backend/
+frontend/
+deploy/nstack/
+nstack.config.mjs
+package.json</code></pre>
+            </div>
+          </div>
+        </InspiraSurface>
+      </section>
+
+      <section id="deploy" class="mx-auto max-w-6xl px-5 py-12 md:px-8 md:py-20">
+        <div class="grid gap-6 lg:grid-cols-[0.95fr_1.05fr] lg:items-stretch">
+          <InspiraSurface class="p-5 md:p-8">
+            <div class="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950">
+              <img
+                src="/assets/nstack-deploy.webp"
+                alt="Dokploy deployment view for an nstack app"
+                class="aspect-[16/11] w-full object-cover opacity-90"
+              >
+            </div>
+          </InspiraSurface>
+
+          <InspiraSurface class="flex flex-col justify-between p-6 md:p-8">
+            <div>
+              <h2 class="max-w-xl text-balance font-display text-4xl font-extrabold leading-tight text-zinc-50 md:text-5xl">
+                Deploy with the same CLI.
+              </h2>
+              <p class="mt-5 max-w-2xl text-[18px] font-semibold leading-8 text-zinc-400">
+                Run <code class="text-zinc-200">nstack deploy</code> from the
+                app directory. The CLI prepares the deploy files and applies the
+                Dokploy target you choose.
+              </p>
+
+              <div class="mt-7 grid gap-3">
+                <div
+                  v-for="item in deployChecks"
+                  :key="item"
+                  class="flex gap-3 rounded-lg border border-zinc-800 bg-zinc-950 p-4"
+                >
+                  <PhCheckCircle :size="20" weight="bold" class="mt-0.5 shrink-0 text-zinc-200" />
+                  <span class="text-[15px] font-bold leading-6 text-zinc-300">
+                    {{ item }}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div class="mt-8 flex flex-col gap-3 sm:flex-row">
+              <InspiraButton as="a" href="#commands" variant="secondary">
+                Review commands
+              </InspiraButton>
+              <InspiraButton as="a" href="#install" variant="quiet">
+                Install nstack
+              </InspiraButton>
+            </div>
+          </InspiraSurface>
+        </div>
+      </section>
+
+      <section class="mx-auto max-w-6xl px-5 py-12 md:px-8 md:py-20">
+        <InspiraSurface class="grid gap-6 p-6 md:grid-cols-[1fr_auto] md:items-center md:p-8">
+          <div>
+            <h2 class="font-display text-3xl font-extrabold text-zinc-50 md:text-4xl">
+              Ready command path
+            </h2>
+            <p class="mt-3 max-w-2xl text-[17px] font-semibold leading-8 text-zinc-400">
+              Install nstack, create an app, run it locally, then deploy when
+              the Dokploy target is ready.
+            </p>
+          </div>
+          <div class="grid gap-2 rounded-lg border border-zinc-800 bg-zinc-950 p-4 text-[13px] font-semibold leading-6 text-zinc-300">
+            <span>nstack init my-app</span>
+            <span>cd my-app</span>
+            <span>nstack dev</span>
+            <span>nstack deploy</span>
+          </div>
+        </InspiraSurface>
+      </section>
+    </main>
+
+    <footer class="border-t border-zinc-800">
+      <div class="mx-auto flex max-w-6xl flex-col gap-4 px-5 py-8 text-[14px] font-semibold text-zinc-500 md:flex-row md:items-center md:justify-between md:px-8">
+        <p>nstack creates Encore and Nuxt apps for Dokploy.</p>
+        <div class="flex gap-4">
+          <a href="#install" class="transition hover:text-zinc-100">Install</a>
+          <a href="#workflow" class="transition hover:text-zinc-100">Workflow</a>
+          <a href="#deploy" class="transition hover:text-zinc-100">Deploy</a>
+        </div>
       </div>
-      <div class="deploy-panel" aria-label="Deploy commands">
-        <pre><code>$ nstack deploy
-$ nstack deploy --cwd apps/web
-$ nstack deploy --env staging</code></pre>
-      </div>
-    </section>
-  </main>
+    </footer>
+  </div>
 </template>
-
-<style scoped>
-:global(html) {
-  scroll-behavior: smooth;
-}
-
-:global(body) {
-  margin: 0;
-  background: #f5f7f4;
-  color: #171717;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}
-
-:global(*) {
-  box-sizing: border-box;
-}
-
-.site-shell {
-  min-height: 100vh;
-  background:
-    linear-gradient(90deg, rgba(23, 23, 23, 0.055) 1px, transparent 1px),
-    linear-gradient(0deg, rgba(23, 23, 23, 0.045) 1px, transparent 1px),
-    #f5f7f4;
-  background-size: 42px 42px;
-}
-
-.topbar {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  min-height: 68px;
-  padding: 0 clamp(18px, 4vw, 56px);
-  border-bottom: 1px solid rgba(23, 23, 23, 0.14);
-  background: rgba(245, 247, 244, 0.92);
-  backdrop-filter: blur(16px);
-}
-
-.brand,
-.nav-links a {
-  color: #171717;
-  text-decoration: none;
-}
-
-.brand {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  font-weight: 800;
-}
-
-.brand-mark {
-  display: inline-grid;
-  width: 34px;
-  height: 34px;
-  place-items: center;
-  border: 2px solid #171717;
-  background: #d8f14f;
-  font-size: 12px;
-  line-height: 1;
-  text-transform: uppercase;
-}
-
-.nav-links {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 16px;
-  font-size: 14px;
-  font-weight: 650;
-}
-
-.hero {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(360px, 0.82fr);
-  gap: clamp(28px, 5vw, 72px);
-  min-height: min(760px, calc(100svh - 42px));
-  padding: clamp(56px, 8vw, 104px) clamp(18px, 4vw, 56px) clamp(44px, 6vw, 76px);
-  align-items: center;
-  border-bottom: 1px solid rgba(23, 23, 23, 0.16);
-}
-
-.hero-copy {
-  max-width: 760px;
-}
-
-h1,
-h2,
-h3,
-p {
-  margin-top: 0;
-}
-
-h1 {
-  margin-bottom: 20px;
-  font-size: clamp(72px, 12vw, 160px);
-  line-height: 0.86;
-  letter-spacing: 0;
-}
-
-h2 {
-  margin-bottom: 18px;
-  font-size: clamp(32px, 5vw, 64px);
-  line-height: 0.98;
-  letter-spacing: 0;
-}
-
-h3 {
-  margin-bottom: 12px;
-  font-size: 24px;
-  line-height: 1.05;
-  letter-spacing: 0;
-}
-
-.lede {
-  max-width: 680px;
-  color: #343434;
-  font-size: clamp(19px, 2vw, 25px);
-  line-height: 1.32;
-}
-
-.hero-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 32px;
-}
-
-.button,
-.copy-button {
-  display: inline-flex;
-  min-height: 44px;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid #171717;
-  border-radius: 6px;
-  padding: 0 18px;
-  font-weight: 800;
-  text-decoration: none;
-  cursor: pointer;
-}
-
-.button-primary {
-  background: #171717;
-  color: #ffffff;
-}
-
-.button-secondary,
-.copy-button {
-  background: #ffffff;
-  color: #171717;
-}
-
-.hero-visual {
-  min-width: 0;
-}
-
-.terminal {
-  overflow: hidden;
-  border: 1px solid #171717;
-  border-radius: 8px;
-  background: #111111;
-  box-shadow: 10px 10px 0 #d8f14f;
-}
-
-.terminal-bar {
-  display: flex;
-  gap: 7px;
-  padding: 13px 15px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
-}
-
-.terminal-bar span {
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-  background: #ff5a3c;
-}
-
-.terminal-bar span:nth-child(2) {
-  background: #f8c44f;
-}
-
-.terminal-bar span:nth-child(3) {
-  background: #31b97a;
-}
-
-pre {
-  margin: 0;
-  overflow-x: auto;
-  padding: clamp(18px, 3vw, 28px);
-  color: #e8f7ef;
-  font-size: clamp(13px, 1.6vw, 16px);
-  line-height: 1.65;
-}
-
-code {
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-}
-
-.workflow-grid article {
-  border: 1px solid rgba(23, 23, 23, 0.18);
-  border-radius: 8px;
-  background: #ffffff;
-}
-
-.install-band,
-.deploy-band {
-  padding: clamp(44px, 7vw, 88px) clamp(18px, 4vw, 56px);
-  border-bottom: 1px solid rgba(23, 23, 23, 0.16);
-}
-
-.section-heading {
-  max-width: 860px;
-}
-
-.install-command {
-  display: flex;
-  align-items: stretch;
-  max-width: 980px;
-  border: 1px solid #171717;
-  border-radius: 8px;
-  background: #ffffff;
-}
-
-.install-command code {
-  display: block;
-  flex: 1;
-  min-width: 0;
-  overflow-x: auto;
-  padding: 18px;
-  font-size: clamp(14px, 2vw, 18px);
-  line-height: 1.4;
-}
-
-.copy-button {
-  min-width: 94px;
-  min-height: 100%;
-  border-width: 0 0 0 1px;
-  border-radius: 0 7px 7px 0;
-}
-
-.note {
-  max-width: 900px;
-  margin: 22px 0 0;
-  color: #3b3b3b;
-  font-size: 17px;
-  line-height: 1.55;
-}
-
-.workflow-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
-  padding: clamp(44px, 7vw, 88px) clamp(18px, 4vw, 56px);
-  border-bottom: 1px solid rgba(23, 23, 23, 0.16);
-}
-
-.workflow-grid article {
-  min-height: 250px;
-  padding: clamp(20px, 3vw, 32px);
-}
-
-.workflow-grid p,
-.deploy-copy p {
-  color: #3b3b3b;
-  font-size: 17px;
-  line-height: 1.55;
-}
-
-.deploy-band {
-  display: grid;
-  grid-template-columns: minmax(0, 0.82fr) minmax(320px, 1fr);
-  gap: clamp(28px, 5vw, 64px);
-  align-items: center;
-}
-
-.deploy-copy {
-  max-width: 740px;
-}
-
-.deploy-panel {
-  border: 1px solid #171717;
-  border-radius: 8px;
-  background: #111111;
-  box-shadow: 10px 10px 0 #d8f14f;
-  overflow: hidden;
-}
-
-.deploy-panel pre {
-  color: #e8f7ef;
-}
-
-@media (max-width: 900px) {
-  .topbar {
-    align-items: flex-start;
-    flex-direction: column;
-    padding-top: 16px;
-    padding-bottom: 16px;
-  }
-
-  .nav-links {
-    justify-content: flex-start;
-  }
-
-  .hero,
-  .deploy-band {
-    grid-template-columns: 1fr;
-  }
-
-  .hero {
-    min-height: auto;
-  }
-
-  .workflow-grid {
-    grid-template-columns: 1fr;
-  }
-
-}
-
-@media (max-width: 560px) {
-  .install-command {
-    grid-template-columns: 1fr;
-  }
-
-  .install-command {
-    display: block;
-  }
-
-  .copy-button {
-    width: 100%;
-    border-width: 1px 0 0;
-    border-radius: 0 0 7px 7px;
-  }
-
-  h1 {
-    font-size: clamp(64px, 23vw, 112px);
-  }
-}
-</style>

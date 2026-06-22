@@ -1,0 +1,37 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@theme {
+  --font-sans: "Nunito Sans", "Aptos", "Segoe UI", sans-serif;
+  --font-display: "Bricolage Grotesque", "Nunito Sans", sans-serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", "Cascadia Code", monospace;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    min-width: 320px;
+    margin: 0;
+    background:
+      radial-gradient(circle at 14% 8%, rgba(161, 161, 170, 0.12), transparent 28rem),
+      radial-gradient(circle at 82% 0%, rgba(113, 113, 122, 0.14), transparent 30rem),
+      linear-gradient(180deg, #0b0b0d 0%, #09090b 46%, #0d0d10 100%);
+    color: #f4f4f5;
+    font-family: var(--font-sans);
+  }
+
+  ::selection {
+    background: rgba(212, 212, 216, 0.24);
+    color: #ffffff;
+  }
+
+  code,
+  pre,
+  kbd {
+    font-family: var(--font-mono);
+  }
+}

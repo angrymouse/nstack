@@ -5,6 +5,7 @@
   "scripts": {
     "setup": "node scripts/nstack-local.mjs setup",
     "dev": "node scripts/dev.mjs",
+    "devexec": "node scripts/devexec.mjs",
     "build": "node scripts/nstack-client.mjs gen && pnpm --dir frontend build",
     "check": "node scripts/check.mjs",
     "deploy": "nstack deploy",
@@ -13,5 +14,8 @@
   "packageManager": "pnpm@10.18.3",
   "engines": {
     "node": ">=22"
+  },
+  "devDependencies": {
+    "playwright": "^1.61.0"
   }
 }

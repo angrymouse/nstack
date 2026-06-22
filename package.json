@@ -1,6 +1,6 @@
 {
   "name": "nstack",
-  "version": "0.1.21",
+  "version": "0.1.47",
   "private": true,
   "type": "module",
   "bin": {

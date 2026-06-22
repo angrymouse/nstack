@@ -17,7 +17,8 @@ Before changing code, read [NSTACK_GUIDELINES.md](./NSTACK_GUIDELINES.md).
 
 - Install/setup: `nstack setup` or `pnpm setup`
 - Develop: `pnpm dev` or `nstack dev`
-- One-shot dev check: `nstack devexec '<js>'`
+- One-shot dev check: `pnpm devexec '<js>'` or `nstack devexec '<js>'`
+- One-shot screenshot: `pnpm devexec 'return await screenshot("/")'`
 - Check: `pnpm check`
 - Deploy: `nstack deploy`
 - Status: `nstack status`
@@ -53,9 +54,13 @@ Before changing code, read [NSTACK_GUIDELINES.md](./NSTACK_GUIDELINES.md).
   clones install dependencies, bootstrap pnpm through Corepack, install the
   Encore CLI when it is missing, and stop with clear Docker instructions only
   when Docker is needed but unavailable. Under AI coding harnesses, use
-  `nstack devexec '<js>'` for one-shot dev-server checks. `nstack dev` is
-  blocked unless `AI_ALLOW_DEVSERVER=1` is set because it starts long-running
-  servers.
+  `pnpm devexec '<js>'` from the app directory for one-shot dev-server checks.
+  From a monorepo root, use `pnpm --dir <app-dir> devexec '<js>'` or
+  `nstack devexec --cwd <app-dir> '<js>'`. Use
+  `screenshot("/", { width: 390, height: 844 })` inside devexec for page
+  screenshots; it writes under `.nstack/screenshots` unless a path is passed.
+  `nstack dev` is blocked unless `AI_ALLOW_DEVSERVER=1` is set because it starts
+  long-running servers.
 - Keep backend resource declarations in Encore source. Let `nstack deploy`
   reconcile Dokploy from Encore metadata.
 - If multiple local deploy targets exist, interactive `nstack deploy` asks for

@@ -117,13 +117,15 @@ exit 1
   assert.match(rootDockerignore, /!\.git\/packed-refs/);
 
   const manifest = JSON.parse(readFileSync(path.join(target, "package.json"), "utf8"));
-  assert.deepEqual(Object.keys(manifest.scripts).sort(), ["build", "check", "deploy", "dev", "setup", "status"]);
+  assert.deepEqual(Object.keys(manifest.scripts).sort(), ["build", "check", "deploy", "dev", "devexec", "setup", "status"]);
   assert.equal(manifest.scripts.setup, "node scripts/nstack-local.mjs setup");
   assert.equal(manifest.scripts.dev, "node scripts/dev.mjs");
+  assert.equal(manifest.scripts.devexec, "node scripts/devexec.mjs");
   assert.equal(manifest.scripts.build, "node scripts/nstack-client.mjs gen && pnpm --dir frontend build");
   assert.equal(manifest.scripts.check, "node scripts/check.mjs");
   assert.equal(manifest.scripts.deploy, "nstack deploy");
   assert.equal(manifest.scripts.status, "nstack status");
+  assert.equal(manifest.devDependencies.playwright, "^1.61.0");
 
   const generatedConfig = readFileSync(path.join(target, "nstack.config.mjs"), "utf8");
   assert.match(generatedConfig, /frontendContext: "\."/);

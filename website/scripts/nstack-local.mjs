@@ -47,6 +47,7 @@ export async function ensureLocalReady(options = {}) {
   ensureNode();
   ensurePnpm({ autoInstallTools: autoInstallTools(options) });
   if (options.install !== false) installDependenciesIfNeeded();
+  if (options.install !== false) ensurePlaywrightChromium();
   ensureEncoreCli({ autoInstallTools: autoInstallTools(options) });
   if (options.docker !== false && backendNeedsDocker()) ensureDockerReady();
 }
@@ -186,6 +187,7 @@ function installDependenciesIfNeeded() {
 
 function dependenciesMissing() {
   return !existsSync(path.join(root, "node_modules", ".modules.yaml"))
+    || !existsSync(path.join(root, "node_modules", "playwright"))
     || !existsSync(path.join(root, "backend", "node_modules", "encore.dev"))
     || !existsSync(path.join(root, "frontend", "node_modules", "nuxt"));
 }
@@ -196,6 +198,22 @@ function approvePnpmBuilds() {
   if (help.status !== 0 || !text.includes("--all")) return;
   const approve = runSync("pnpm", ["approve-builds", "--all"]);
   if (approve.status !== 0) process.exit(approve.status || 1);
+}
+
+function ensurePlaywrightChromium() {
+  const dryRun = runSync("pnpm", ["exec", "playwright", "install", "--dry-run", "chromium"], { stdio: ["ignore", "pipe", "pipe"] });
+  if (dryRun.status !== 0) {
+    fail([
+      "Playwright is installed, but its browser installer could not run.",
+      ...commandDetail(dryRun).map((line) => `  ${line}`),
+    ]);
+  }
+  const locations = [...String(dryRun.stdout || "").matchAll(/Install location:\s+(.+)/g)]
+    .map((match) => match[1].trim());
+  if (locations.length > 0 && locations.every((location) => existsSync(location))) return;
+  console.log("Installing Playwright Chromium for devexec screenshots...");
+  const install = runSync("pnpm", ["exec", "playwright", "install", "chromium"]);
+  if (install.status !== 0) process.exit(install.status || 1);
 }
 
 function ensureEncoreCli({ autoInstallTools }) {

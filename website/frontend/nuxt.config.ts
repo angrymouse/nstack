@@ -1,3 +1,5 @@
+import tailwindcss from "@tailwindcss/vite";
+
 const isProduction = process.env.NODE_ENV === "production";
 const backendHost = process.env.NSTACK_BACKEND_HOST || "backend";
 const publicApiBaseUrl =
@@ -13,6 +15,9 @@ const serverApiBaseUrl =
 
 export default defineNuxtConfig({
   compatibilityDate: "2025-07-15",
+  devtools: {
+    enabled: false,
+  },
   future: {
     compatibilityVersion: 4,
   },
@@ -20,7 +25,9 @@ export default defineNuxtConfig({
     buildCache: true,
   },
   sourcemap: false,
+  css: ["~/assets/css/main.css"],
   vite: {
+    plugins: [tailwindcss()],
     build: {
       reportCompressedSize: false,
     },
