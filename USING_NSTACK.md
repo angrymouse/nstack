@@ -53,7 +53,7 @@ Use a host name for `--domain`, not a URL with `https://`.
 You need Node 22 or newer. Install the nstack CLI with the curl installer:
 
 ```sh
-curl -fsSL https://nstack.playground.nik.technology/install.sh | bash
+curl -fsSL https://nstack.tech/install.sh | bash
 ```
 
 Check the CLI:

@@ -5,7 +5,7 @@
 It keeps the app shape boring:
 
 ```sh
-curl -fsSL https://nstack.playground.nik.technology/install.sh | bash
+curl -fsSL https://nstack.tech/install.sh | bash
 nstack init my-app
 cd my-app
 nstack setup
