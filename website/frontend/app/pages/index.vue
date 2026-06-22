@@ -195,9 +195,9 @@ useHead({
             </p>
 
             <div class="mt-8 flex flex-col gap-3 sm:flex-row">
-              <InspiraButton as="a" href="#install" variant="rainbow">
+              <InspiraButton as="a" href="#install" variant="rainbow" class="pastel-cta">
                 Start in 3 commands
-                <PhArrowRight :size="18" weight="bold" class="text-amber-100" aria-hidden="true" />
+                <PhArrowRight :size="18" weight="bold" class="text-zinc-950/80" aria-hidden="true" />
               </InspiraButton>
               <InspiraButton as="a" href="#workflow" variant="quiet">
                 See architecture

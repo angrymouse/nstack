@@ -119,6 +119,23 @@
     -webkit-background-clip: text;
   }
 
+  .pastel-cta {
+    border-color: rgba(255, 216, 118, 0.58);
+    background:
+      linear-gradient(105deg, #ff9cc7 0%, #ffd876 42%, #ffb177 68%, #9fdcff 100%);
+    color: #181012;
+    box-shadow:
+      0 18px 46px rgba(255, 156, 199, 0.16),
+      0 10px 30px rgba(255, 216, 118, 0.08);
+  }
+
+  .pastel-cta:hover {
+    border-color: rgba(255, 238, 188, 0.82);
+    background:
+      linear-gradient(105deg, #ffa8cd 0%, #ffe18a 42%, #ffc188 68%, #aee3ff 100%);
+    color: #120d0b;
+  }
+
   .command-card {
     transition:
       transform 220ms ease,
