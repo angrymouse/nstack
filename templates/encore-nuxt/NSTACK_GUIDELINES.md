@@ -142,7 +142,10 @@ For deployment issues:
 ```sh
 nstack doctor
 nstack status
+nstack logs
 nstack logs --follow
 nstack pull
 nstack rollback
 ```
+
+Failed deploys print a Dokploy log tail when one is available. Run `nstack logs [deployment-id] --tail 300` to read more from a specific deployment.

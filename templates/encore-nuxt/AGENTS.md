@@ -23,7 +23,9 @@ Before changing code, read [NSTACK_GUIDELINES.md](./NSTACK_GUIDELINES.md).
 - Deploy: `nstack deploy`
 - Status: `nstack status`
 - Backup: `nstack backup`
-- Logs: `nstack logs --follow`
+- Logs: `nstack logs [deployment-id]` or `nstack logs --follow`
+
+Failed deploys print a Dokploy log tail when one is available. Use `nstack logs [deployment-id] --tail 300` when the printed tail is not enough.
 
 ## Working Rules
 

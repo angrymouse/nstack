@@ -1136,7 +1136,8 @@ Daily commands:
   nstack deploy                  build, deploy, verify, and print the URL
   nstack status                  show the current release and Dokploy state
   nstack env set <name>          save an app runtime secret locally
-  nstack logs --follow           follow the latest Dokploy deployment logs
+  nstack logs [deployment-id]    fetch Dokploy deployment logs
+  nstack logs --follow           follow the latest deployment logs
 
 When needed:
   nstack doctor                  explain missing local setup

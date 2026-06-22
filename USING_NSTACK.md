@@ -832,6 +832,8 @@ nstack logs <deployment-id>
 nstack logs <deployment-id> --follow
 ```
 
+When `nstack deploy`, `nstack redeploy`, `nstack rollback`, or `nstack wait` fails after a Dokploy deployment is available, nstack prints a Dokploy log tail before returning the original error.
+
 Cancel an active deployment:
 
 ```sh

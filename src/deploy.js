@@ -45,6 +45,7 @@ const releaseManifestSchema = "nstack.release.v1";
 const maxReleaseHistory = 20;
 const defaultValidationPollMs = 100;
 const maxValidationPollMs = 250;
+const defaultFailureLogTail = 200;
 const defaultEndpointRequestTimeoutMs = 2000;
 const encoreBackendGitignorePath = "backend/.gitignore";
 const encoreBackendGitignoreText = "encore.gen.go\nencore.gen.cue\n/.encore\n/encore.gen\n";
@@ -330,6 +331,7 @@ export async function deploy(options = {}) {
     checks = await progress.step("Verifying deployment", () => runReleaseChecks(cwd, config, release, options), { allowOutput: true });
     timings.push(...checks.timings);
   } catch (error) {
+    await printDeploymentLogsForError({ cwd, config, state: nextState, release, error, options });
     nextState.lastAttempt = releaseAttempt(release, {
       status: "failed",
       error: summarizeError(error),
@@ -581,10 +583,16 @@ export async function waitForDeployment(options = {}) {
   const state = loadState(cwd, config.deploy.target);
   const release = releaseForWait(config, cwd, state);
 
-  const checks = await runReleaseChecks(cwd, config, release, {
-    ...options,
-    requireDeploymentMatch: isSourceBackedCompose(config) || options.requireDeploymentMatch,
-  });
+  let checks = null;
+  try {
+    checks = await runReleaseChecks(cwd, config, release, {
+      ...options,
+      requireDeploymentMatch: isSourceBackedCompose(config) || options.requireDeploymentMatch,
+    });
+  } catch (error) {
+    await printDeploymentLogsForError({ cwd, config, state, release, error, options });
+    throw error;
+  }
   const nextState = {
     ...state,
     dokploy: { ...(state.dokploy || {}) },
@@ -636,6 +644,7 @@ export async function redeploy(options = {}) {
     });
     saveState(nextState, cwd, config.deploy.target);
   } catch (error) {
+    await printDeploymentLogsForError({ cwd, config, state: nextState, release, error, options });
     nextState.lastAttempt = releaseAttempt(release, {
       status: "failed",
       error: summarizeError(error),
@@ -709,6 +718,7 @@ export async function syncEnvironment(options = {}) {
     });
     saveState(nextState, cwd, config.deploy.target);
   } catch (error) {
+    await printDeploymentLogsForError({ cwd, config, state: nextState, release, error, options });
     nextState.lastAttempt = releaseAttempt(release, {
       status: "failed",
       envPush: true,
@@ -792,6 +802,7 @@ export async function rollback(args = [], options = {}) {
     }));
     saveState(nextState, cwd, config.deploy.target);
   } catch (error) {
+    await printDeploymentLogsForError({ cwd, config, state: nextState, release, error, options });
     nextState.lastAttempt = releaseAttempt(release, rollbackAttemptDetails({
       status: "failed",
       error: summarizeError(error),
@@ -840,6 +851,50 @@ function summarizeError(error) {
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 500);
+}
+
+async function printDeploymentLogsForError({ cwd, config, state, release, error, options = {} }) {
+  if (options.json) return null;
+  if (!config.deploy.provider.url || !config.deploy.provider.apiKey) return null;
+  const composeId = state.dokploy?.composeId || "";
+  if (!composeId) return null;
+
+  const provider = new DokployProvider({ config, state });
+  const tail = clampLogTail(Number(options.tail || defaultFailureLogTail));
+  try {
+    const deployment = await deploymentForFailureLogs(provider, composeId, release, error);
+    const deploymentId = deployment?.id || "";
+    if (!deploymentId) return null;
+
+    const logs = await provider.readDeploymentLogs(deploymentId, { tail });
+    console.error("");
+    console.error(`Dokploy deployment logs (${deploymentId}, tail ${tail}):`);
+    console.error(logs ? logs.replace(/\s+$/, "") : "  none");
+    console.error("");
+    return { deploymentId, tail, logs, deployment };
+  } catch (logError) {
+    console.error(`Could not fetch Dokploy deployment logs: ${summarizeError(logError)}`);
+    return { error: summarizeError(logError) };
+  }
+}
+
+async function deploymentForFailureLogs(provider, composeId, release, error) {
+  if (error?.deployment?.id) return error.deployment;
+  if (error?.deploymentId) return { id: error.deploymentId };
+
+  const deployments = Array.isArray(error?.deployments) && error.deployments.length > 0
+    ? error.deployments
+    : await provider.listComposeDeployments(composeId);
+  return deploymentForRelease(deployments, release)
+    || deployments.find(isFailedDeployment)
+    || deployments.find(isActiveDeployment)
+    || deployments[0]
+    || null;
+}
+
+function clampLogTail(value) {
+  if (!Number.isFinite(value)) return defaultFailureLogTail;
+  return Math.max(1, Math.min(10_000, Math.trunc(value)));
 }
 
 async function runReleaseChecks(cwd, config, release, options = {}) {
@@ -1088,6 +1143,8 @@ function isFailedDeployment(deployment) {
 function deploymentFailedError(deployment) {
   const error = new Error(`Dokploy deployment ${deployment?.id || deployment?.title || "latest"} failed with status ${deployment?.status || "unknown"}.`);
   error.code = "NSTACK_DOKPLOY_DEPLOYMENT_FAILED";
+  error.deployment = deployment;
+  error.deploymentId = deployment?.id || "";
   return error;
 }
 
@@ -1101,7 +1158,10 @@ function deploymentWaitTimeoutError({ release, deployments, error }) {
     ? `${deployments[0].id || deployments[0].title || "latest"} ${deployments[0].status || "unknown"} ${deployments[0].description || ""}`.trim()
     : "none";
   const detail = error ? ` Last Dokploy error: ${error instanceof Error ? error.message : String(error)}` : "";
-  return new Error(`Timed out waiting for Dokploy deployment for ${expected}. Latest deployment: ${latest}.${detail}`);
+  const timeout = new Error(`Timed out waiting for Dokploy deployment for ${expected}. Latest deployment: ${latest}.${detail}`);
+  timeout.code = "NSTACK_DOKPLOY_DEPLOYMENT_TIMEOUT";
+  timeout.deployments = deployments || [];
+  return timeout;
 }
 
 function deploymentTriggeredAt(deployment) {

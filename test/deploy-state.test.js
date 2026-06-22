@@ -2923,6 +2923,8 @@ test("deploy fails after Dokploy deploy when post-deploy status audit finds drif
 
   const calls = [];
   const originalFetch = globalThis.fetch;
+  const originalError = console.error;
+  const errors = [];
   globalThis.fetch = async (url, init = {}) => {
     const parsed = new URL(String(url));
     const endpoint = parsed.pathname.replace(/^\/api\/(?:trpc\/)?/, "");
@@ -2940,6 +2942,16 @@ test("deploy fails after Dokploy deploy when post-deploy status audit finds drif
     }
     if (init.method === "GET" && endpoint === "schedule.list") return Response.json({ json: [] });
     if (init.method === "GET" && endpoint === "settings.health") return Response.json({ json: { status: "ok" } });
+    if (init.method === "GET" && endpoint === "deployment.allByCompose") {
+      return Response.json({ json: [
+        { deploymentId: "deploy-audit", status: "done", createdAt: "2026-06-18T00:02:00.000Z", title: "remote build" },
+      ] });
+    }
+    if (init.method === "GET" && endpoint === "deployment.readLogs") {
+      assert.equal(parsed.searchParams.get("deploymentId"), "deploy-audit");
+      assert.equal(parsed.searchParams.get("tail"), "200");
+      return Response.json({ json: { logs: "frontend build failed\nmissing app file\n" } });
+    }
     if (init.method === "GET" && endpoint === "compose.one") {
       return Response.json({ json: {
         composeId: "compose-1",
@@ -2966,6 +2978,7 @@ test("deploy fails after Dokploy deploy when post-deploy status audit finds drif
   };
 
   try {
+    console.error = (value = "") => errors.push(String(value));
     await assert.rejects(
       deploy({
         cwd,
@@ -2982,6 +2995,7 @@ test("deploy fails after Dokploy deploy when post-deploy status audit finds drif
       },
     );
   } finally {
+    console.error = originalError;
     globalThis.fetch = originalFetch;
     for (const key of envKeys) {
       if (originalEnv[key] === undefined) delete process.env[key];
@@ -2990,6 +3004,9 @@ test("deploy fails after Dokploy deploy when post-deploy status audit finds drif
   }
 
   const state = JSON.parse(readFileSync(path.join(cwd, ".nstack", "state.json"), "utf8"));
+  assert.ok(calls.includes("deployment.readLogs"));
+  assert.match(errors.join("\n"), /Dokploy deployment logs \(deploy-audit, tail 200\):/);
+  assert.match(errors.join("\n"), /frontend build failed\nmissing app file/);
   assert.equal(state.lastRelease, undefined);
   assert.equal(state.lastAttempt.status, "failed");
   assert.match(state.lastAttempt.error, /post-deploy status audit failed/);
