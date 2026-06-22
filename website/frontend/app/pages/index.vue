@@ -10,7 +10,6 @@ import {
   PhFolderSimple,
   PhGitBranch,
   PhPlay,
-  PhStack,
   PhTerminalWindow,
 } from "@phosphor-icons/vue";
 import InspiraButton from "~/components/inspira/ui/button/InspiraButton.vue";
@@ -54,26 +53,31 @@ const quickStart = [
 
 const workflow = [
   {
-    icon: PhCode,
-    title: "Nuxt frontend",
-    body: "Nuxt imports the generated Encore client, so API changes show up as typed calls in the app.",
+    icon: PhTerminalWindow,
+    title: "Three-command start",
+    body: "Install nstack, create an app, and run the full local stack before you configure deployment.",
   },
   {
     icon: PhBracketsCurly,
-    title: "Encore backend",
-    body: "Define APIs and resources in Encore. nstack keeps the frontend client in sync during local development.",
+    title: "Encore-shaped backend",
+    body: "APIs, databases, caches, Pub/Sub, and object storage live in source, so the architecture stays visible as the app grows.",
+  },
+  {
+    icon: PhCode,
+    title: "Agent-ready frontend",
+    body: "Generated app docs guide agents toward real typography, concrete copy, and screens that feel authored.",
   },
   {
     icon: PhCloudArrowUp,
     title: "Dokploy deploy",
-    body: "Deploy provisions the Dokploy app, routes, domains, and Encore resource wiring from one CLI flow.",
+    body: "nstack provisions the app, routes, domains, and resource wiring from the same project shape.",
   },
 ];
 
 const deployChecks = [
   "Encore resources are discovered from source",
-  "Dokploy services are rendered into deploy files",
-  "Generated clients are synced before build and deploy",
+  "Dokploy services are rendered from the app shape",
+  "Generated clients sync before local runs, builds, and deploys",
   "Targets can be reused for staging and production",
 ];
 
@@ -83,7 +87,7 @@ useHead({
     {
       name: "description",
       content:
-        "Create Encore and Nuxt apps with generated clients, local orchestration, and Dokploy deployment.",
+        "Develop scalable, opinionated, AI-focused full stack apps with Encore, Nuxt, and Dokploy in three CLI commands.",
     },
     {
       property: "og:title",
@@ -92,10 +96,23 @@ useHead({
     {
       property: "og:description",
       content:
-        "Create Encore and Nuxt apps with generated clients, local orchestration, and Dokploy deployment.",
+        "Develop scalable, opinionated, AI-focused full stack apps with Encore, Nuxt, and Dokploy in three CLI commands.",
+    },
+    {
+      property: "og:image",
+      content: "/assets/nstack-hero.webp",
     },
   ],
   link: [
+    {
+      rel: "icon",
+      type: "image/png",
+      href: "/favicon.png",
+    },
+    {
+      rel: "apple-touch-icon",
+      href: "/assets/nstack-logo-192.png",
+    },
     {
       rel: "preconnect",
       href: "https://fonts.googleapis.com",
@@ -114,7 +131,7 @@ useHead({
 </script>
 
 <template>
-  <div class="min-h-dvh text-zinc-100">
+  <div class="page-shell min-h-dvh text-zinc-100">
     <a
       href="#main"
       class="sr-only focus:not-sr-only focus:squircle-sm focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:bg-zinc-100 focus:px-4 focus:py-3 focus:font-sans focus:font-extrabold focus:text-zinc-950"
@@ -122,19 +139,16 @@ useHead({
       Skip to content
     </a>
 
-    <header class="sticky top-0 z-40 border-b border-zinc-800 bg-zinc-950">
+    <header class="sticky top-0 z-40 border-b border-zinc-800/80 bg-zinc-950/80 backdrop-blur-xl">
       <nav
         class="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-4 md:px-8"
         aria-label="Primary"
       >
         <a href="#main" class="flex items-center gap-3 text-zinc-50">
-          <span
-            class="squircle-sm grid size-9 place-items-center border border-zinc-700 bg-zinc-900"
-            aria-hidden="true"
-          >
-            <PhStack :size="20" weight="bold" />
+          <span class="logo-frame" aria-hidden="true">
+            <img src="/assets/nstack-logo.png" alt="" class="size-7 object-contain">
           </span>
-          <span class="font-display text-[22px] font-extrabold tracking-normal">
+          <span class="pastel-text font-display text-[22px] font-extrabold tracking-normal">
             nstack
           </span>
         </a>
@@ -160,55 +174,59 @@ useHead({
           </a>
         </div>
 
-        <InspiraButton as="a" href="#install" size="sm" variant="secondary">
-          Install
+        <InspiraButton as="a" href="#install" size="sm" variant="rainbow">
+          <span class="pastel-text">Install</span>
         </InspiraButton>
       </nav>
     </header>
 
     <main id="main">
-      <section class="mx-auto grid max-w-6xl gap-10 px-5 pb-16 pt-14 md:px-8 md:pb-24 md:pt-20 lg:grid-cols-[1.05fr_0.95fr] lg:items-end">
-        <div>
-          <h1 class="max-w-3xl text-balance font-display text-5xl font-extrabold leading-[0.98] tracking-normal text-zinc-50 md:text-7xl">
-            Create Encore and Nuxt apps that deploy to Dokploy.
-          </h1>
-          <p class="mt-6 max-w-2xl text-pretty text-[19px] font-semibold leading-8 text-zinc-300 md:text-[21px]">
-            nstack creates the app, keeps the Encore client generated for Nuxt,
-            and runs the local stack with one command.
-          </p>
+      <section class="hero-section">
+        <div class="hero-grid mx-auto grid max-w-6xl gap-10 px-5 pb-16 pt-14 md:px-8 md:pb-24 md:pt-20 lg:grid-cols-[1.05fr_0.95fr] lg:items-end">
+          <div>
+            <h1 class="max-w-3xl text-balance font-display text-5xl font-extrabold leading-[0.98] tracking-normal text-zinc-50 md:text-7xl">
+              Develop <span class="pastel-text">scalable, opinionated, AI-focused</span>
+              full stack apps.
+            </h1>
+            <p class="mt-6 max-w-2xl text-pretty text-[19px] font-semibold leading-8 text-zinc-300 md:text-[21px]">
+              Three commands create the app, run Encore and Nuxt locally, and
+              deploy to Dokploy. The generated project starts with architecture
+              that can grow under real traffic.
+            </p>
 
-          <div class="mt-8 flex flex-col gap-3 sm:flex-row">
-            <InspiraButton as="a" href="#install">
-              Install nstack
-              <PhArrowRight :size="18" weight="bold" aria-hidden="true" />
-            </InspiraButton>
-            <InspiraButton as="a" href="#workflow" variant="quiet">
-              See workflow
-            </InspiraButton>
-          </div>
-        </div>
-
-        <InspiraSurface id="install" class="p-4 md:p-5">
-          <div class="flex items-start justify-between gap-5">
-            <div>
-              <p class="text-[15px] font-extrabold text-zinc-50">Install command</p>
-              <p class="mt-1 text-[14px] font-semibold leading-6 text-zinc-400">
-                Run this once, then create an app with
-                <code class="text-zinc-200">nstack init my-app</code>.
-              </p>
+            <div class="mt-8 flex flex-col gap-3 sm:flex-row">
+              <InspiraButton as="a" href="#install" variant="rainbow">
+                <span class="pastel-text">Start in 3 commands</span>
+                <PhArrowRight :size="18" weight="bold" class="text-amber-100" aria-hidden="true" />
+              </InspiraButton>
+              <InspiraButton as="a" href="#workflow" variant="quiet">
+                See architecture
+              </InspiraButton>
             </div>
-            <button
-              type="button"
-              class="squircle-sm inline-flex size-10 shrink-0 items-center justify-center border border-zinc-700 bg-zinc-900 text-zinc-200 transition hover:border-zinc-500 hover:text-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100/70 active:translate-y-px"
-              :aria-label="copiedInstall ? 'Install command copied' : 'Copy install command'"
-              @click="copyInstall"
-            >
-              <PhCheckCircle v-if="copiedInstall" :size="19" weight="bold" />
-              <PhCopy v-else :size="19" weight="bold" />
-            </button>
           </div>
-          <pre class="squircle-md mt-5 whitespace-pre-wrap break-all border border-zinc-800 bg-zinc-950 p-4 text-[13px] leading-6 text-zinc-200"><code>{{ installCommand }}</code></pre>
-        </InspiraSurface>
+
+          <InspiraSurface id="install" class="hero-command-panel p-4 md:p-5">
+            <div class="flex items-start justify-between gap-5">
+              <div>
+                <p class="text-[15px] font-extrabold text-zinc-50">Start in one shell</p>
+                <p class="mt-1 text-[14px] font-semibold leading-6 text-zinc-400">
+                  Run the installer, then create an app with
+                  <code class="text-zinc-200">nstack init my-app</code>.
+                </p>
+              </div>
+              <button
+                type="button"
+                class="squircle-sm inline-flex size-10 shrink-0 items-center justify-center border border-rose-200/35 bg-zinc-950/80 text-zinc-200 transition hover:border-amber-200/70 hover:text-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-200/70 active:translate-y-px"
+                :aria-label="copiedInstall ? 'Install command copied' : 'Copy install command'"
+                @click="copyInstall"
+              >
+                <PhCheckCircle v-if="copiedInstall" :size="19" weight="bold" />
+                <PhCopy v-else :size="19" weight="bold" />
+              </button>
+            </div>
+            <pre class="squircle-md mt-5 whitespace-pre-wrap break-all border border-zinc-800 bg-zinc-950/92 p-4 text-[13px] leading-6 text-zinc-200"><code>{{ installCommand }}</code></pre>
+          </InspiraSurface>
+        </div>
       </section>
 
       <section id="commands" class="mx-auto max-w-6xl px-5 py-10 md:px-8 md:py-14">
@@ -217,10 +235,10 @@ useHead({
             v-for="item in quickStart"
             :key="item.label"
             tone="soft"
-            class="p-5"
+            class="command-card p-5"
           >
             <div class="flex items-center gap-3">
-              <span class="squircle-sm grid size-10 place-items-center bg-zinc-800 text-zinc-100">
+              <span class="command-icon squircle-sm grid size-10 place-items-center text-zinc-100">
                 <component :is="item.icon" :size="21" weight="bold" />
               </span>
               <p class="font-display text-xl font-extrabold text-zinc-50">
@@ -236,11 +254,12 @@ useHead({
         <div class="grid gap-10 lg:grid-cols-[0.85fr_1.15fr] lg:items-start">
           <div class="lg:sticky lg:top-28">
             <h2 class="max-w-xl text-balance font-display text-4xl font-extrabold leading-tight text-zinc-50 md:text-5xl">
-              One workflow for local work and deployment.
+              Architecture agents can keep working with.
             </h2>
             <p class="mt-5 max-w-xl text-pretty text-[18px] font-semibold leading-8 text-zinc-400">
-              The generated project is a normal Encore and Nuxt app. nstack
-              handles the glue code, client generation, and deploy target setup.
+              nstack gives agents a real project shape: typed APIs, resource
+              declarations, frontend rules, and deployment paths that stay
+              visible in source.
             </p>
           </div>
 
@@ -302,17 +321,18 @@ export const hello = api(
           </div>
           <div class="border-t border-zinc-800 p-6 md:p-8 lg:border-l lg:border-t-0">
             <h2 class="max-w-lg text-balance font-display text-3xl font-extrabold leading-tight text-zinc-50 md:text-4xl">
-              Start with a real app structure.
+              Start from a production-shaped app.
             </h2>
             <p class="mt-4 text-[17px] font-semibold leading-8 text-zinc-400">
-              The template includes the Encore backend, Nuxt frontend, generated
-              client location, local scripts, and deploy files nstack manages.
+              The template gives agents clear ownership boundaries: Encore APIs
+              and resources, Nuxt screens, generated client code, and
+              nstack-managed deploy artifacts.
             </p>
 
             <div class="squircle-lg mt-7 border border-zinc-800 bg-zinc-950 p-4">
               <div class="flex items-center gap-2 text-[13px] font-bold text-zinc-500">
                 <PhGitBranch :size="17" weight="bold" aria-hidden="true" />
-                <span>Generated project</span>
+                <span>Project shape</span>
               </div>
               <pre class="mt-4 overflow-x-auto text-[13px] font-semibold leading-7 text-zinc-300"><code>backend/
 frontend/
@@ -339,12 +359,12 @@ package.json</code></pre>
           <InspiraSurface class="flex flex-col justify-between p-6 md:p-8">
             <div>
               <h2 class="max-w-xl text-balance font-display text-4xl font-extrabold leading-tight text-zinc-50 md:text-5xl">
-                Deploy with the same CLI.
+                Deploy the same architecture.
               </h2>
               <p class="mt-5 max-w-2xl text-[18px] font-semibold leading-8 text-zinc-400">
                 Run <code class="text-zinc-200">nstack deploy</code> from the
-                app directory. The CLI prepares the deploy files and applies the
-                Dokploy target you choose.
+                app directory. The CLI prepares deploy files, provisions
+                resources, and applies the Dokploy target you choose.
               </p>
 
               <div class="mt-7 grid gap-3">
@@ -377,11 +397,12 @@ package.json</code></pre>
         <InspiraSurface class="grid gap-6 p-6 md:grid-cols-[1fr_auto] md:items-center md:p-8">
           <div>
             <h2 class="font-display text-3xl font-extrabold text-zinc-50 md:text-4xl">
-              Ready command path
+              Three-command loop
             </h2>
             <p class="mt-3 max-w-2xl text-[17px] font-semibold leading-8 text-zinc-400">
-              Install nstack, create an app, run it locally, then deploy when
-              the Dokploy target is ready.
+              Use this path for a new app. Add
+              <code class="text-zinc-200">nstack deploy</code> after the
+              Dokploy target is configured.
             </p>
           </div>
           <div class="squircle-lg grid gap-2 border border-zinc-800 bg-zinc-950 p-4 text-[13px] font-semibold leading-6 text-zinc-300">
@@ -396,7 +417,7 @@ package.json</code></pre>
 
     <footer class="border-t border-zinc-800">
       <div class="mx-auto flex max-w-6xl flex-col gap-4 px-5 py-8 text-[14px] font-semibold text-zinc-500 md:flex-row md:items-center md:justify-between md:px-8">
-        <p>nstack creates Encore and Nuxt apps for Dokploy.</p>
+        <p>nstack builds AI-ready Encore and Nuxt apps for Dokploy.</p>
         <div class="flex gap-4">
           <a href="#install" class="transition hover:text-zinc-100">Install</a>
           <a href="#workflow" class="transition hover:text-zinc-100">Workflow</a>

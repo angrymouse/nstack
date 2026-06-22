@@ -6,7 +6,7 @@ import { cn } from "@inspira-ui/plugins";
 const props = withDefaults(
   defineProps<{
     as?: "a" | "button";
-    variant?: "primary" | "secondary" | "quiet";
+    variant?: "primary" | "secondary" | "quiet" | "rainbow";
     size?: "md" | "sm";
     class?: HTMLAttributes["class"];
   }>(),
@@ -24,6 +24,8 @@ const variants = {
     "border-zinc-700 bg-zinc-900 text-zinc-100 hover:border-zinc-500 hover:bg-zinc-800 active:bg-zinc-800",
   quiet:
     "border-transparent bg-transparent text-zinc-300 hover:bg-zinc-900 hover:text-zinc-50 active:bg-zinc-800",
+  rainbow:
+    "border-rose-200/45 bg-zinc-950/75 text-zinc-50 shadow-[0_18px_48px_rgba(255,143,189,0.13)] hover:border-amber-200/70 hover:bg-zinc-900/90 active:bg-zinc-950",
 };
 
 const sizes = {
