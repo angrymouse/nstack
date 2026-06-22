@@ -174,7 +174,7 @@ useHead({
       class="grid min-h-dvh gap-8 px-5 pb-20 pt-28 md:px-8 lg:grid-cols-[18rem_minmax(0,1fr)_16rem] lg:gap-0 lg:px-0 lg:pt-24 xl:grid-cols-[19.5rem_minmax(0,1fr)_17rem]"
     >
       <aside
-        class="border-zinc-800 lg:sticky lg:top-24 lg:h-[calc(100dvh-6rem)] lg:self-start lg:overflow-y-auto lg:border-r lg:px-5 lg:py-7 xl:px-7"
+        class="border-zinc-800 lg:sticky lg:top-24 lg:self-start lg:border-r lg:px-5 lg:py-7 xl:px-7"
       >
         <a
           href="/"
@@ -216,7 +216,7 @@ useHead({
       </article>
 
       <aside
-        class="hidden border-l border-zinc-800 px-5 py-7 lg:sticky lg:top-24 lg:block lg:h-[calc(100dvh-6rem)] lg:self-start lg:overflow-y-auto xl:px-7"
+        class="hidden border-l border-zinc-800 px-5 py-7 lg:sticky lg:top-24 lg:block lg:self-start xl:px-7"
       >
         <p class="text-[12px] font-extrabold text-zinc-500">On this page</p>
         <nav v-if="tocLinks.length > 0" class="mt-3 grid gap-2" aria-label="Table of contents">
