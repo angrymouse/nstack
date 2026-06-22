@@ -7,7 +7,7 @@ ENV PATH="${PNPM_HOME}:${PATH}"
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 WORKDIR /workspace
 
-RUN corepack enable && corepack prepare pnpm@10.18.3 --activate
+RUN corepack enable && corepack prepare pnpm@10.33.2 --activate
 
 ENV NUXT_TELEMETRY_DISABLED=1
 
