@@ -2,7 +2,7 @@
   "scripts": {
     "dev": {
       "type": "service",
-      "command": "pnpm run dev"
+      "command": "pnpm --dir website/frontend dev"
     }
   }
 }
