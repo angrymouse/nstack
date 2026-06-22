@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref } from "vue";
+import { computed, onBeforeUnmount, ref } from "vue";
 import {
   PhArrowRight,
   PhBracketsCurly,
+  PhBookOpen,
   PhCheckCircle,
   PhCloudArrowUp,
   PhCode,
   PhCopy,
+  PhDiscordLogo,
+  PhFileCode,
   PhFolderSimple,
   PhGitBranch,
   PhPlay,
@@ -17,6 +20,7 @@ import InspiraSurface from "~/components/inspira/ui/surface/InspiraSurface.vue";
 
 const installCommand =
   "curl -fsSL https://nstack.playground.nik.technology/install.sh | bash";
+const discordInvite = "https://discord.gg/zHAJ4Ym5TP";
 const copiedInstall = ref(false);
 let copiedTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -51,11 +55,26 @@ const quickStart = [
   },
 ];
 
+const foundations = [
+  {
+    name: "Encore.ts",
+    logo: "/assets/logos/encore.svg",
+  },
+  {
+    name: "Nuxt",
+    logo: "/assets/logos/nuxt.svg",
+  },
+  {
+    name: "Dokploy",
+    logo: "/assets/logos/dokploy.svg",
+  },
+];
+
 const workflow = [
   {
     icon: PhTerminalWindow,
     title: "Three-command start",
-    body: "Install nstack, create an app, and run the full local stack before you configure deployment.",
+    body: "Install nstack, create an app, and let the CLI run local services, rebuild the client, and prepare deploy files.",
   },
   {
     icon: PhBracketsCurly,
@@ -65,66 +84,419 @@ const workflow = [
   {
     icon: PhCode,
     title: "Agent-ready frontend",
-    body: "Generated app docs guide agents toward real typography, concrete copy, and screens that feel authored.",
+    body: "The typed Encore client is rebuilt as APIs change, so Nuxt screens stay in sync while agents work.",
   },
   {
     icon: PhCloudArrowUp,
-    title: "Dokploy deploy",
-    body: "nstack provisions the app, routes, domains, and resource wiring from the same project shape.",
+    title: "Dokploy provisioning",
+    body: "nstack turns the project shape into Dokploy services, routes, domains, resources, and deploy files.",
   },
 ];
 
 const deployChecks = [
   "Encore resources are discovered from source",
-  "Dokploy services are rendered from the app shape",
-  "Generated clients sync before local runs, builds, and deploys",
-  "Targets can be reused for staging and production",
+  "Needed Dokploy resources are provisioned from the app shape",
+  "Typed clients rebuild before local runs, builds, and deploys",
+  "nstack owns the build and deploy handoff for each target",
 ];
 
+type CodeTone =
+  | "attribute"
+  | "base"
+  | "boolean"
+  | "comment"
+  | "function"
+  | "keyword"
+  | "muted"
+  | "number"
+  | "operator"
+  | "punctuation"
+  | "property"
+  | "string"
+  | "tag"
+  | "type";
+
+type CodeToken = {
+  text: string;
+  tone?: CodeTone;
+};
+
+type CodeFile = {
+  path: string;
+  label: string;
+  language: string;
+  source: string;
+};
+
+type ProjectRow =
+  | {
+      type: "folder";
+      label: string;
+      level: 0 | 1 | 2;
+    }
+  | {
+      type: "file";
+      path: string;
+      label: string;
+      level: 0 | 1 | 2;
+    };
+
+const codeToneClasses: Record<CodeTone, string> = {
+  attribute: "text-cyan-200",
+  base: "text-zinc-300",
+  boolean: "text-orange-200",
+  comment: "text-zinc-600",
+  function: "text-yellow-100",
+  keyword: "text-sky-200",
+  muted: "text-zinc-600",
+  number: "text-orange-200",
+  operator: "text-zinc-500",
+  punctuation: "text-zinc-500",
+  property: "text-blue-200",
+  string: "text-emerald-200",
+  tag: "text-rose-200",
+  type: "text-teal-200",
+};
+
+const projectIndentClasses: Record<0 | 1 | 2, string> = {
+  0: "pl-2",
+  1: "pl-6",
+  2: "pl-10",
+};
+
+const projectRows: ProjectRow[] = [
+  { type: "folder", label: "backend/", level: 0 },
+  { type: "file", label: "api.ts", path: "backend/api.ts", level: 1 },
+  { type: "folder", label: "frontend/", level: 0 },
+  { type: "folder", label: "app/", level: 1 },
+  {
+    type: "file",
+    label: "pages/index.vue",
+    path: "frontend/app/pages/index.vue",
+    level: 2,
+  },
+  {
+    type: "file",
+    label: "generated/encore-client.ts",
+    path: "frontend/app/generated/encore-client.ts",
+    level: 2,
+  },
+  { type: "folder", label: "deploy/nstack/", level: 0 },
+  {
+    type: "file",
+    label: "dokploy.yml",
+    path: "deploy/nstack/dokploy.yml",
+    level: 1,
+  },
+  { type: "file", label: "nstack.config.mjs", path: "nstack.config.mjs", level: 0 },
+  { type: "file", label: "package.json", path: "package.json", level: 0 },
+];
+
+const codeFiles: CodeFile[] = [
+  {
+    path: "backend/api.ts",
+    label: "api.ts",
+    language: "TypeScript",
+    source: `import { api } from "encore.dev/api";
+
+export const health = api(
+  { expose: true, method: "GET", path: "/health" },
+  async () => ({ ok: true }),
+);
+
+export const hello = api(
+  { expose: true, method: "GET", path: "/hello/:name" },
+  async ({ name }: { name: string }) => ({
+    message: \`hello \${name}\`,
+  }),
+);`,
+  },
+  {
+    path: "frontend/app/pages/index.vue",
+    label: "pages/index.vue",
+    language: "Vue",
+    source: `<script setup lang="ts">
+import { client } from "~/generated/encore-client";
+
+const { data, pending } = await useAsyncData("hello", () =>
+  client.hello({ name: "nstack" }),
+);
+</scr${"ipt"}>
+
+<template>
+  <main>
+    <p v-if="pending">Loading...</p>
+    <p v-else>{{ data?.message }}</p>
+  </main>
+</template>`,
+  },
+  {
+    path: "frontend/app/generated/encore-client.ts",
+    label: "generated/encore-client.ts",
+    language: "Generated TypeScript",
+    source: `// generated by nstack
+export interface HelloResponse {
+  message: string;
+}
+
+export const client = {
+  health: () => api<{ ok: boolean }>("/health"),
+  hello: (input: { name: string }) =>
+    api<HelloResponse>(\`/hello/\${input.name}\`),
+};`,
+  },
+  {
+    path: "deploy/nstack/dokploy.yml",
+    label: "dokploy.yml",
+    language: "YAML",
+    source: `services:
+  backend:
+    image: my-app-backend
+    env:
+      ENCORE_APP_ID: my-app
+  frontend:
+    image: my-app-frontend
+    routes:
+      - app.example.com`,
+  },
+  {
+    path: "nstack.config.mjs",
+    label: "nstack.config.mjs",
+    language: "JavaScript",
+    source: `export default {
+  app: "my-app",
+  backend: "backend",
+  frontend: "frontend",
+  deploy: {
+    provider: "dokploy",
+    target: "production",
+  },
+};`,
+  },
+  {
+    path: "package.json",
+    label: "package.json",
+    language: "JSON",
+    source: `{
+  "name": "my-app",
+  "private": true,
+  "scripts": {
+    "dev": "nstack dev",
+    "deploy": "nstack deploy"
+  },
+  "dependencies": {
+    "encore.dev": "latest",
+    "nuxt": "latest"
+  }
+}`,
+  },
+];
+
+const jsKeywords = new Set([
+  "async",
+  "await",
+  "const",
+  "default",
+  "export",
+  "from",
+  "function",
+  "import",
+  "interface",
+  "return",
+  "type",
+]);
+
+const typeKeywords = new Set(["boolean", "number", "string", "void"]);
+const literalKeywords = new Set(["false", "null", "true", "undefined"]);
+
+const pushToken = (tokens: CodeToken[], text: string, tone?: CodeTone) => {
+  if (text.length > 0) tokens.push({ text, tone });
+};
+
+const highlightYamlLine = (line: string): CodeToken[] => {
+  const tokens: CodeToken[] = [];
+  const match = line.match(/^(\s*)([A-Za-z0-9_-]+)(:)(.*)$/);
+  if (!match) {
+    pushToken(tokens, line, line.trim().startsWith("-") ? "string" : "base");
+    return tokens;
+  }
+
+  pushToken(tokens, match[1]);
+  pushToken(tokens, match[2], "property");
+  pushToken(tokens, match[3], "punctuation");
+  if (match[4]) pushToken(tokens, match[4], "string");
+  return tokens;
+};
+
+const highlightJsonLine = (line: string): CodeToken[] => {
+  const tokens: CodeToken[] = [];
+  let index = 0;
+
+  while (index < line.length) {
+    const rest = line.slice(index);
+    const stringMatch = rest.match(/^"([^"\\]|\\.)*"/);
+    const numberMatch = rest.match(/^-?\d+(\.\d+)?/);
+    const wordMatch = rest.match(/^[A-Za-z]+/);
+    const whitespaceMatch = rest.match(/^\s+/);
+
+    if (whitespaceMatch) {
+      pushToken(tokens, whitespaceMatch[0]);
+      index += whitespaceMatch[0].length;
+    } else if (stringMatch) {
+      const after = line.slice(index + stringMatch[0].length).trimStart();
+      pushToken(tokens, stringMatch[0], after.startsWith(":") ? "property" : "string");
+      index += stringMatch[0].length;
+    } else if (numberMatch) {
+      pushToken(tokens, numberMatch[0], "number");
+      index += numberMatch[0].length;
+    } else if (wordMatch) {
+      pushToken(tokens, wordMatch[0], literalKeywords.has(wordMatch[0]) ? "boolean" : "base");
+      index += wordMatch[0].length;
+    } else {
+      pushToken(tokens, rest[0], /[{}[\],:]/.test(rest[0]) ? "punctuation" : "base");
+      index += 1;
+    }
+  }
+
+  return tokens;
+};
+
+const highlightCodeLine = (line: string): CodeToken[] => {
+  const tokens: CodeToken[] = [];
+  let index = 0;
+
+  while (index < line.length) {
+    const rest = line.slice(index);
+    const whitespaceMatch = rest.match(/^\s+/);
+    const commentMatch = rest.match(/^\/\/.*/);
+    const stringMatch = rest.match(/^(`(?:\\.|[^`])*`|"(?:\\.|[^"])*"|'(?:\\.|[^'])*')/);
+    const numberMatch = rest.match(/^\d+(\.\d+)?/);
+    const tagMatch = rest.match(/^<\/?[A-Za-z][A-Za-z0-9-]*/);
+    const identifierMatch = rest.match(/^[A-Za-z_$][A-Za-z0-9_$]*/);
+    const operatorMatch = rest.match(/^(=>|\?\?|\?\.|===|!==|<=|>=|[=:+*/%<>?-])/);
+
+    if (whitespaceMatch) {
+      pushToken(tokens, whitespaceMatch[0]);
+      index += whitespaceMatch[0].length;
+    } else if (commentMatch) {
+      pushToken(tokens, commentMatch[0], "comment");
+      break;
+    } else if (stringMatch) {
+      pushToken(tokens, stringMatch[0], "string");
+      index += stringMatch[0].length;
+    } else if (numberMatch) {
+      pushToken(tokens, numberMatch[0], "number");
+      index += numberMatch[0].length;
+    } else if (tagMatch) {
+      const marker = tagMatch[0].startsWith("</") ? "</" : "<";
+      const name = tagMatch[0].slice(marker.length);
+      pushToken(tokens, marker, "punctuation");
+      pushToken(tokens, name, "tag");
+      index += tagMatch[0].length;
+    } else if (identifierMatch) {
+      const word = identifierMatch[0];
+      const previous = line.slice(0, index).trimEnd().at(-1);
+      const next = line.slice(index + word.length).trimStart().at(0);
+      let tone: CodeTone | undefined;
+
+      if (jsKeywords.has(word)) tone = "keyword";
+      else if (typeKeywords.has(word)) tone = "type";
+      else if (literalKeywords.has(word)) tone = "boolean";
+      else if (previous === "." || next === ":") tone = "property";
+      else if (next === "(") tone = "function";
+      else if (/^[A-Z]/.test(word)) tone = "type";
+      else if (previous === "<" || previous === "/") tone = "tag";
+
+      pushToken(tokens, word, tone);
+      index += word.length;
+    } else if (operatorMatch) {
+      pushToken(tokens, operatorMatch[0], "operator");
+      index += operatorMatch[0].length;
+    } else {
+      const char = rest[0];
+      pushToken(tokens, char, /[{}[\](),.;]/.test(char) ? "punctuation" : "base");
+      index += 1;
+    }
+  }
+
+  return tokens;
+};
+
+const highlightSource = (file: CodeFile): CodeToken[][] => {
+  const lines = file.source.split("\n");
+  if (file.language === "YAML") return lines.map(highlightYamlLine);
+  if (file.language === "JSON") return lines.map(highlightJsonLine);
+  return lines.map(highlightCodeLine);
+};
+
+const selectedCodePath = ref(codeFiles[0].path);
+
+const selectCodeFile = (path: string) => {
+  selectedCodePath.value = path;
+};
+
+const selectedCodeFile = computed(
+  () =>
+    codeFiles.find((file) => file.path === selectedCodePath.value) ??
+    codeFiles[0],
+);
+
+const selectedCodeLines = computed(() => highlightSource(selectedCodeFile.value));
+
+const runtimeConfig = useRuntimeConfig();
+const siteUrl = String(
+  runtimeConfig.public.siteUrl || "https://nstack.playground.nik.technology",
+).replace(/\/$/, "");
+const pageTitle = "nstack | Deployment and provisioning for Encore, Nuxt, and Dokploy";
+const pageDescription =
+  "nstack creates Encore plus Nuxt apps, provisions Dokploy resources, syncs the typed client, runs local dev, and owns the deploy pipeline.";
+const pageImage = `${siteUrl}/assets/og-image.png`;
+
+useSeoMeta({
+  title: pageTitle,
+  description: pageDescription,
+  ogTitle: pageTitle,
+  ogDescription: pageDescription,
+  ogSiteName: "nstack",
+  ogType: "website",
+  ogUrl: siteUrl,
+  ogImage: pageImage,
+  ogImageAlt: "nstack landing page with command setup and project file preview",
+  ogImageWidth: 1200,
+  ogImageHeight: 630,
+  ogLocale: "en_US",
+  twitterCard: "summary_large_image",
+  twitterTitle: pageTitle,
+  twitterDescription: pageDescription,
+  twitterImage: pageImage,
+});
+
 useHead({
-  title: "nstack",
-  meta: [
-    {
-      name: "description",
-      content:
-        "Develop scalable, opinionated, AI-focused full stack apps with Encore, Nuxt, and Dokploy in three CLI commands.",
-    },
-    {
-      property: "og:title",
-      content: "nstack",
-    },
-    {
-      property: "og:description",
-      content:
-        "Develop scalable, opinionated, AI-focused full stack apps with Encore, Nuxt, and Dokploy in three CLI commands.",
-    },
-    {
-      property: "og:image",
-      content: "/assets/nstack-hero.webp",
-    },
-  ],
   link: [
     {
-      rel: "icon",
-      type: "image/png",
-      href: "/favicon.png",
+      rel: "canonical",
+      href: siteUrl,
     },
+  ],
+  script: [
     {
-      rel: "apple-touch-icon",
-      href: "/assets/nstack-logo-192.png",
-    },
-    {
-      rel: "preconnect",
-      href: "https://fonts.googleapis.com",
-    },
-    {
-      rel: "preconnect",
-      href: "https://fonts.gstatic.com",
-      crossorigin: "",
-    },
-    {
-      rel: "stylesheet",
-      href: "https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;600;700;800&family=IBM+Plex+Mono:wght@500;600&family=Nunito+Sans:wght@500;600;700;800;900&display=swap",
+      type: "application/ld+json",
+      textContent: JSON.stringify({
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        name: "nstack",
+        applicationCategory: "DeveloperApplication",
+        operatingSystem: "Linux, macOS, Windows",
+        description: pageDescription,
+        url: siteUrl,
+        image: pageImage,
+        softwareRequirements: "Node.js 22 or newer",
+        offers: {
+          "@type": "Offer",
+          price: "0",
+          priceCurrency: "USD",
+        },
+      }),
     },
   ],
 });
@@ -139,9 +511,9 @@ useHead({
       Skip to content
     </a>
 
-    <header class="sticky top-0 z-40 border-b border-zinc-800/80 bg-zinc-950/80 backdrop-blur-xl">
+    <header class="fixed inset-x-0 top-0 z-40 px-5 md:px-8">
       <nav
-        class="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-4 md:px-8"
+        class="nav-bulb mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3 md:px-5"
         aria-label="Primary"
       >
         <a href="#main" class="flex items-center gap-3 text-zinc-50">
@@ -172,6 +544,12 @@ useHead({
           >
             Commands
           </a>
+          <a
+            href="/docs"
+            class="squircle-sm px-3 py-2 text-[14px] font-bold text-zinc-300 transition hover:bg-zinc-900 hover:text-zinc-50"
+          >
+            Docs
+          </a>
         </div>
 
         <InspiraButton as="a" href="#install" size="sm" variant="secondary">
@@ -182,30 +560,71 @@ useHead({
 
     <main id="main">
       <section class="hero-section">
-        <div class="hero-grid mx-auto grid max-w-6xl gap-10 px-5 pb-16 pt-14 md:px-8 md:pb-24 md:pt-20 lg:grid-cols-[1.05fr_0.95fr] lg:items-end">
-          <div>
-            <h1 class="max-w-3xl text-balance font-display text-5xl font-extrabold leading-[0.98] tracking-normal text-zinc-50 md:text-7xl">
-              Develop <span class="pastel-text">scalable, opinionated, AI-focused</span>
+        <div class="hero-grid mx-auto flex max-w-6xl flex-col items-center px-5 pb-12 pt-28 text-center md:px-8 md:pb-16 md:pt-28">
+          <div class="mx-auto flex max-w-6xl flex-col items-center">
+            <div class="hero-brand-lockup mb-5 grid place-items-center text-zinc-50">
+              <span class="hero-logo-frame" aria-hidden="true">
+                <img src="/assets/nstack-logo.png" alt="" class="size-10 object-contain">
+              </span>
+            </div>
+
+            <h1 class="mx-auto max-w-[72rem] text-balance font-display text-5xl font-extrabold leading-[0.98] tracking-normal text-zinc-50 md:text-7xl">
+              Develop
+              <span class="pastel-text">
+                scalable, opinionated, <span class="whitespace-nowrap">AI-focused</span>
+              </span>
               full stack apps.
             </h1>
-            <p class="mt-6 max-w-2xl text-pretty text-[19px] font-semibold leading-8 text-zinc-300 md:text-[21px]">
-              Three commands create the app, run Encore and Nuxt locally, and
-              deploy to Dokploy. The generated project starts with architecture
-              that can grow under real traffic.
+            <p class="mx-auto mt-6 max-w-2xl text-pretty text-[19px] font-semibold leading-8 text-zinc-300 md:text-[21px]">
+              nstack is the deployment and provisioning tool for Encore + Nuxt
+              apps on Dokploy. Create the app, keep the typed client synced,
+              run local dev, provision resources, and ship through one CLI
+              pipeline.
             </p>
 
-            <div class="mt-8 flex flex-col gap-3 sm:flex-row">
+            <div class="mt-7 flex flex-wrap items-center justify-center gap-3">
               <InspiraButton as="a" href="#install" variant="rainbow" class="pastel-cta">
-                Start in 3 commands
-                <PhArrowRight :size="18" weight="bold" class="text-zinc-950/80" aria-hidden="true" />
+                <span class="pastel-cta-text">Start in 3 commands</span>
+                <PhArrowRight :size="18" weight="bold" class="text-zinc-300" aria-hidden="true" />
+              </InspiraButton>
+              <InspiraButton as="a" href="/docs" variant="secondary">
+                <PhBookOpen :size="18" weight="bold" aria-hidden="true" />
+                Read docs
+              </InspiraButton>
+              <InspiraButton
+                as="a"
+                :href="discordInvite"
+                target="_blank"
+                rel="noopener noreferrer"
+                variant="quiet"
+              >
+                <PhDiscordLogo :size="18" weight="bold" aria-hidden="true" />
+                Join Discord
               </InspiraButton>
               <InspiraButton as="a" href="#workflow" variant="quiet">
                 See architecture
               </InspiraButton>
             </div>
+
+            <div class="mt-7 flex flex-col items-center">
+              <p class="text-[13px] font-extrabold text-zinc-500">Starts with</p>
+              <div class="mt-3 flex flex-wrap justify-center gap-2.5">
+                <div
+                  v-for="foundation in foundations"
+                  :key="foundation.name"
+                  class="foundation-logo inline-flex h-12 items-center justify-center px-2.5"
+                >
+                  <img
+                    :src="foundation.logo"
+                    :alt="foundation.name"
+                    class="foundation-logo-img"
+                  >
+                </div>
+              </div>
+            </div>
           </div>
 
-          <InspiraSurface id="install" class="hero-command-panel p-4 md:p-5">
+          <InspiraSurface id="install" class="hero-command-panel mx-auto mt-10 w-full max-w-2xl p-4 text-left md:p-5">
             <div class="flex items-start justify-between gap-5">
               <div>
                 <p class="text-[15px] font-extrabold text-zinc-50">Start in one shell</p>
@@ -258,8 +677,8 @@ useHead({
             </h2>
             <p class="mt-5 max-w-xl text-pretty text-[18px] font-semibold leading-8 text-zinc-400">
               nstack gives agents a real project shape: typed APIs, resource
-              declarations, frontend rules, and deployment paths that stay
-              visible in source.
+              declarations, frontend rules, generated client code, and Dokploy
+              deployment paths that stay visible in source.
             </p>
           </div>
 
@@ -287,58 +706,89 @@ useHead({
       </section>
 
       <section class="mx-auto max-w-6xl px-5 py-12 md:px-8 md:py-20">
-        <InspiraSurface class="grid gap-0 lg:grid-cols-[1.05fr_0.95fr]">
-          <div class="p-5 md:p-8">
-            <div class="squircle-lg border border-zinc-800 bg-zinc-950">
-              <div class="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
-                <div class="flex items-center gap-2 text-[13px] font-extrabold text-zinc-200">
-                  <PhFolderSimple :size="17" weight="bold" aria-hidden="true" />
-                  <span>my-app</span>
-                </div>
-                <code class="text-[12px] font-semibold text-zinc-500">nstack init</code>
-              </div>
-              <div class="grid gap-0 md:grid-cols-[0.8fr_1.2fr]">
-                <div class="border-b border-zinc-800 p-4 md:border-b-0 md:border-r">
-                  <div class="space-y-2 text-[13px] font-bold leading-6 text-zinc-400">
-                    <p class="text-zinc-200">backend/</p>
-                    <p class="pl-4">api.ts</p>
-                    <p class="text-zinc-200">frontend/</p>
-                    <p class="pl-4">app/</p>
-                    <p class="text-zinc-200">deploy/nstack/</p>
-                    <p>nstack.config.mjs</p>
-                  </div>
-                </div>
-                <div class="p-4">
-                  <pre class="overflow-x-auto text-[13px] font-semibold leading-7 text-zinc-300"><code>await api.health()
-
-export const hello = api(
-  { method: "GET", path: "/hello" },
-  async () => ({ message: "ready" })
-)</code></pre>
-                </div>
-              </div>
+        <InspiraSurface class="overflow-hidden">
+          <div class="grid gap-5 border-b border-zinc-800 p-5 md:grid-cols-[0.95fr_1.05fr] md:p-7 md:items-end">
+            <div>
+              <h2 class="max-w-2xl text-balance font-display text-3xl font-extrabold leading-tight text-zinc-50 md:text-4xl">
+                Start from a production-shaped app.
+              </h2>
+              <p class="mt-4 max-w-2xl text-[17px] font-semibold leading-8 text-zinc-400">
+                Pick a file to inspect the generated Encore API, Nuxt page,
+                typed client, deploy output, and package scripts.
+              </p>
+            </div>
+            <div class="flex items-center justify-start gap-2 md:justify-end">
+              <PhGitBranch :size="18" weight="bold" class="text-zinc-500" aria-hidden="true" />
+              <code class="font-mono text-[12px] font-semibold text-zinc-500">nstack init my-app</code>
             </div>
           </div>
-          <div class="border-t border-zinc-800 p-6 md:p-8 lg:border-l lg:border-t-0">
-            <h2 class="max-w-lg text-balance font-display text-3xl font-extrabold leading-tight text-zinc-50 md:text-4xl">
-              Start from a production-shaped app.
-            </h2>
-            <p class="mt-4 text-[17px] font-semibold leading-8 text-zinc-400">
-              The template gives agents clear ownership boundaries: Encore APIs
-              and resources, Nuxt screens, generated client code, and
-              nstack-managed deploy artifacts.
-            </p>
 
-            <div class="squircle-lg mt-7 border border-zinc-800 bg-zinc-950 p-4">
-              <div class="flex items-center gap-2 text-[13px] font-bold text-zinc-500">
-                <PhGitBranch :size="17" weight="bold" aria-hidden="true" />
-                <span>Project shape</span>
+          <div class="grid lg:grid-cols-[19rem_minmax(0,1fr)]">
+            <div
+              class="ide-tree max-h-[18rem] overflow-y-auto border-b border-zinc-800 p-3 lg:h-[31.5rem] lg:max-h-none lg:border-b-0 lg:border-r"
+              role="tablist"
+              aria-label="Generated project files"
+            >
+              <div class="mb-2 flex items-center gap-2 px-2 py-1 text-[13px] font-extrabold text-zinc-200">
+                <PhFolderSimple :size="17" weight="bold" aria-hidden="true" />
+                <span>my-app</span>
               </div>
-              <pre class="mt-4 overflow-x-auto text-[13px] font-semibold leading-7 text-zinc-300"><code>backend/
-frontend/
-deploy/nstack/
-nstack.config.mjs
-package.json</code></pre>
+              <template v-for="row in projectRows" :key="row.type === 'file' ? row.path : `${row.label}-${row.level}`">
+                <div
+                  v-if="row.type === 'folder'"
+                  class="flex h-9 items-center gap-2 pr-2 text-[13px] font-extrabold leading-none text-zinc-300"
+                  :class="projectIndentClasses[row.level]"
+                >
+                  <PhFolderSimple :size="15" weight="bold" aria-hidden="true" />
+                  <span>{{ row.label }}</span>
+                </div>
+                <button
+                  v-else
+                  type="button"
+                  role="tab"
+                  :aria-selected="selectedCodePath === row.path"
+                  :aria-controls="`code-panel-${row.path}`"
+                  class="code-file-tab squircle-sm flex h-9 w-full items-center gap-2 border pr-2 text-left text-[13px] font-bold leading-none transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100/70 active:translate-y-px"
+                  :class="[
+                    projectIndentClasses[row.level],
+                    selectedCodePath === row.path ? 'code-file-tab-selected' : '',
+                  ]"
+                  @click="selectCodeFile(row.path)"
+                >
+                  <PhFileCode :size="15" weight="bold" aria-hidden="true" />
+                  <span class="truncate">{{ row.label }}</span>
+                </button>
+              </template>
+            </div>
+
+            <div class="flex min-h-0 min-w-0 flex-col bg-zinc-950">
+              <div class="flex min-h-14 flex-wrap items-center justify-between gap-3 border-b border-zinc-800 px-4 py-3">
+                <div class="min-w-0">
+                  <p class="truncate font-mono text-[12px] font-bold text-zinc-200">
+                    {{ selectedCodeFile.path }}
+                  </p>
+                  <p class="mt-1 text-[11px] font-extrabold text-zinc-600">
+                    {{ selectedCodeFile.language }}
+                  </p>
+                </div>
+              </div>
+              <pre
+                :id="`code-panel-${selectedCodeFile.path}`"
+                role="tabpanel"
+                class="ide-code-pane h-[28rem] overflow-auto p-0 text-[13px] font-semibold leading-7"
+                tabindex="0"
+              ><code class="block min-w-max py-4"><span
+                v-for="(line, lineIndex) in selectedCodeLines"
+                :key="`${selectedCodeFile.path}-${lineIndex}`"
+                class="code-line block min-h-7 whitespace-pre pr-6"
+              ><span
+                class="code-line-number mr-4 inline-block w-10 select-none text-right text-zinc-700"
+                aria-hidden="true"
+              >{{ lineIndex + 1 }}</span><span
+                v-for="(token, tokenIndex) in line"
+                :key="`${selectedCodeFile.path}-${lineIndex}-${tokenIndex}`"
+                :class="codeToneClasses[token.tone ?? 'base']"
+              >{{ token.text }}</span></span></code></pre>
             </div>
           </div>
         </InspiraSurface>
@@ -359,12 +809,13 @@ package.json</code></pre>
           <InspiraSurface class="flex flex-col justify-between p-6 md:p-8">
             <div>
               <h2 class="max-w-xl text-balance font-display text-4xl font-extrabold leading-tight text-zinc-50 md:text-5xl">
-                Deploy the same architecture.
+                Provision Dokploy, then ship.
               </h2>
               <p class="mt-5 max-w-2xl text-[18px] font-semibold leading-8 text-zinc-400">
                 Run <code class="text-zinc-200">nstack deploy</code> from the
-                app directory. The CLI prepares deploy files, provisions
-                resources, and applies the Dokploy target you choose.
+                app directory. The CLI prepares deploy files, provisions needed
+                resources in Dokploy, rebuilds the generated client, and runs
+                the deployment pipeline for the target you choose.
               </p>
 
               <div class="mt-7 grid gap-3">
@@ -402,7 +853,8 @@ package.json</code></pre>
             <p class="mt-3 max-w-2xl text-[17px] font-semibold leading-8 text-zinc-400">
               Use this path for a new app. Add
               <code class="text-zinc-200">nstack deploy</code> after the
-              Dokploy target is configured.
+              Dokploy target is configured, and nstack takes the build and
+              deploy handoff from there.
             </p>
           </div>
           <div class="squircle-lg grid gap-2 border border-zinc-800 bg-zinc-950 p-4 text-[13px] font-semibold leading-6 text-zinc-300">
@@ -417,11 +869,20 @@ package.json</code></pre>
 
     <footer class="border-t border-zinc-800">
       <div class="mx-auto flex max-w-6xl flex-col gap-4 px-5 py-8 text-[14px] font-semibold text-zinc-500 md:flex-row md:items-center md:justify-between md:px-8">
-        <p>nstack builds AI-ready Encore and Nuxt apps for Dokploy.</p>
+        <p>nstack provisions and deploys Encore + Nuxt apps on Dokploy.</p>
         <div class="flex gap-4">
           <a href="#install" class="transition hover:text-zinc-100">Install</a>
           <a href="#workflow" class="transition hover:text-zinc-100">Workflow</a>
           <a href="#deploy" class="transition hover:text-zinc-100">Deploy</a>
+          <a href="/docs" class="transition hover:text-zinc-100">Docs</a>
+          <a
+            :href="discordInvite"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="transition hover:text-zinc-100"
+          >
+            Discord
+          </a>
         </div>
       </div>
     </footer>

@@ -2,9 +2,9 @@
 @import "tw-animate-css";
 
 @theme {
-  --font-sans: "Nunito Sans", "Aptos", "Segoe UI", sans-serif;
-  --font-display: "Bricolage Grotesque", "Nunito Sans", sans-serif;
-  --font-mono: "IBM Plex Mono", "SFMono-Regular", "Cascadia Code", monospace;
+  --font-sans: "Recursive", "Aptos", "Segoe UI", sans-serif;
+  --font-display: "Recursive", "Aptos", "Segoe UI", sans-serif;
+  --font-mono: "Recursive", "SFMono-Regular", "Cascadia Code", monospace;
 }
 
 @layer base {
@@ -22,6 +22,7 @@
       linear-gradient(180deg, #0b0b0d 0%, #09090b 46%, #0d0d10 100%);
     color: #f4f4f5;
     font-family: var(--font-sans);
+    font-variation-settings: "CASL" 0.18, "CRSV" 0, "MONO" 0, "slnt" 0;
   }
 
   body::before {
@@ -46,6 +47,7 @@
   pre,
   kbd {
     font-family: var(--font-mono);
+    font-variation-settings: "CASL" 0, "CRSV" 0, "MONO" 1, "slnt" 0;
   }
 }
 
@@ -53,6 +55,15 @@
   .page-shell {
     background:
       linear-gradient(180deg, rgba(9, 9, 11, 0.2) 0%, rgba(9, 9, 11, 0.86) 38%, #09090b 100%);
+  }
+
+  .font-display {
+    font-variation-settings: "CASL" 0.42, "CRSV" 0, "MONO" 0, "slnt" 0;
+  }
+
+  .font-mono,
+  .ide-code-pane {
+    font-variation-settings: "CASL" 0, "CRSV" 0, "MONO" 1, "slnt" 0;
   }
 
   .hero-section {
@@ -74,19 +85,31 @@
 
   .hero-section::after {
     position: absolute;
-    inset: 4rem -12% auto 40%;
+    inset: 3rem 8% auto 8%;
     z-index: -1;
-    height: 32rem;
+    height: 30rem;
     content: "";
     background:
-      linear-gradient(135deg, transparent 0 18%, rgba(255, 156, 199, 0.1) 18% 24%, transparent 24% 36%, rgba(255, 216, 118, 0.12) 36% 42%, transparent 42% 56%, rgba(159, 220, 255, 0.08) 56% 61%, transparent 61% 100%);
-    filter: blur(22px);
-    opacity: 0.82;
-    transform: skewY(-8deg);
+      linear-gradient(135deg, transparent 0 18%, rgba(255, 216, 118, 0.09) 18% 24%, transparent 24% 36%, rgba(212, 212, 216, 0.1) 36% 42%, transparent 42% 56%, rgba(159, 220, 255, 0.06) 56% 61%, transparent 61% 100%);
+    filter: blur(24px);
+    opacity: 0.76;
+    transform: skewY(-5deg);
   }
 
   .hero-grid {
-    min-height: clamp(42rem, 78dvh, 54rem);
+    min-height: clamp(37rem, 68dvh, 48rem);
+  }
+
+  .nav-bulb {
+    border: 1px solid rgba(63, 63, 70, 0.74);
+    border-top: 0;
+    border-radius: 0 0 1.35rem 1.35rem;
+    background: rgba(9, 9, 11, 0.76);
+    box-shadow:
+      0 18px 60px rgba(0, 0, 0, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(18px);
+    corner-shape: squircle;
   }
 
   .hero-command-panel {
@@ -112,6 +135,18 @@
     filter: drop-shadow(0 0 10px rgba(255, 216, 118, 0.14));
   }
 
+  .hero-logo-frame {
+    display: grid;
+    width: 3rem;
+    height: 3rem;
+    place-items: center;
+  }
+
+  .hero-logo-frame img {
+    width: 3rem;
+    height: 3rem;
+  }
+
   .pastel-text {
     color: transparent;
     background: linear-gradient(94deg, #ff9cc7 0%, #ffd876 50%, #f4efe4 100%);
@@ -120,20 +155,38 @@
   }
 
   .pastel-cta {
-    border-color: rgba(255, 216, 118, 0.58);
+    border-color: rgba(255, 255, 255, 0.16);
     background:
-      linear-gradient(105deg, #ff9cc7 0%, #ffd876 42%, #ffb177 68%, #9fdcff 100%);
-    color: #181012;
-    box-shadow:
-      0 18px 46px rgba(255, 156, 199, 0.16),
-      0 10px 30px rgba(255, 216, 118, 0.08);
+      linear-gradient(135deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)),
+      #111113;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
   }
 
   .pastel-cta:hover {
-    border-color: rgba(255, 238, 188, 0.82);
+    border-color: rgba(255, 216, 118, 0.32);
     background:
-      linear-gradient(105deg, #ffa8cd 0%, #ffe18a 42%, #ffc188 68%, #aee3ff 100%);
-    color: #120d0b;
+      linear-gradient(135deg, rgba(255, 216, 118, 0.08), rgba(255, 156, 199, 0.06)),
+      #18181b;
+  }
+
+  .pastel-cta-text {
+    color: transparent;
+    background: linear-gradient(96deg, #ff9cc7 0%, #ffd876 48%, #9fdcff 100%);
+    background-clip: text;
+    -webkit-background-clip: text;
+  }
+
+  .foundation-logo {
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .foundation-logo-img {
+    display: block;
+    width: auto;
+    height: 2.25rem;
+    max-width: 4.75rem;
+    object-fit: contain;
   }
 
   .command-card {
@@ -179,5 +232,65 @@
   .squircle-xl {
     border-radius: 1.35rem;
     corner-shape: squircle;
+  }
+
+  .code-file-tab {
+    border-color: transparent;
+    color: #71717a;
+  }
+
+  .code-file-tab:hover {
+    background-color: #18181b;
+    color: #e4e4e7;
+  }
+
+  .code-file-tab-selected {
+    border-color: #3f3f46 !important;
+    background-color: #27272a !important;
+    color: #fafafa !important;
+  }
+
+  .code-file-tab-selected:hover {
+    background-color: #27272a !important;
+    color: #fafafa !important;
+  }
+
+  .ide-tree,
+  .ide-code-pane {
+    scrollbar-color: #3f3f46 #09090b;
+    scrollbar-width: thin;
+  }
+
+  .ide-tree::-webkit-scrollbar,
+  .ide-code-pane::-webkit-scrollbar {
+    width: 0.7rem;
+    height: 0.7rem;
+  }
+
+  .ide-tree::-webkit-scrollbar-track,
+  .ide-code-pane::-webkit-scrollbar-track {
+    background: #09090b;
+  }
+
+  .ide-tree::-webkit-scrollbar-thumb,
+  .ide-code-pane::-webkit-scrollbar-thumb {
+    border: 2px solid #09090b;
+    border-radius: 999px;
+    background: #3f3f46;
+  }
+
+  .code-line:hover {
+    background: rgba(39, 39, 42, 0.42);
+  }
+
+  .code-line-number {
+    position: sticky;
+    left: 0;
+    background: #09090b;
+    box-shadow: 12px 0 16px #09090b;
+  }
+
+  .code-line:hover .code-line-number {
+    background: #111113;
   }
 }
