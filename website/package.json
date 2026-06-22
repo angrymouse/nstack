@@ -6,7 +6,7 @@
     "setup": "node scripts/nstack-local.mjs setup",
     "dev": "node scripts/dev.mjs",
     "devexec": "node scripts/devexec.mjs",
-    "worktree": "PASEO_PORT=${PASEO_PORT:-3000} pnpm dev",
+    "worktree": "AI_ALLOW_DEVSERVER=1 PASEO_PORT=${PASEO_PORT:-3000} pnpm dev",
     "build": "node scripts/nstack-client.mjs gen && pnpm --dir frontend build",
     "check": "node scripts/check.mjs",
     "deploy": "nstack deploy",

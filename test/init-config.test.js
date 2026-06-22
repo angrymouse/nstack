@@ -117,10 +117,11 @@ exit 1
   assert.match(rootDockerignore, /!\.git\/packed-refs/);
 
   const manifest = JSON.parse(readFileSync(path.join(target, "package.json"), "utf8"));
-  assert.deepEqual(Object.keys(manifest.scripts).sort(), ["build", "check", "deploy", "dev", "devexec", "setup", "status"]);
+  assert.deepEqual(Object.keys(manifest.scripts).sort(), ["build", "check", "deploy", "dev", "devexec", "setup", "status", "worktree"]);
   assert.equal(manifest.scripts.setup, "node scripts/nstack-local.mjs setup");
   assert.equal(manifest.scripts.dev, "node scripts/dev.mjs");
   assert.equal(manifest.scripts.devexec, "node scripts/devexec.mjs");
+  assert.equal(manifest.scripts.worktree, "AI_ALLOW_DEVSERVER=1 PASEO_PORT=${PASEO_PORT:-3000} pnpm dev");
   assert.equal(manifest.scripts.build, "node scripts/nstack-client.mjs gen && pnpm --dir frontend build");
   assert.equal(manifest.scripts.check, "node scripts/check.mjs");
   assert.equal(manifest.scripts.deploy, "nstack deploy");

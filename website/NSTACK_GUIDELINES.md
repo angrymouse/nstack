@@ -79,6 +79,8 @@ directory for one-shot checks against a temporary dev stack. From the nstack
 repo root, use `pnpm --dir website devexec '<js>'` or
 `nstack devexec --cwd website '<js>'`. Set `AI_ALLOW_DEVSERVER=1` only when an
 agent truly needs an interactive dev server.
+For Paseo-managed worktrees, run `pnpm worktree`. It sets `AI_ALLOW_DEVSERVER=1`
+and uses `PASEO_PORT` to avoid frontend collisions.
 By default, `devexec` moves to the next free frontend or backend port when
 `localhost:3000` or `localhost:4000` is already in use. If you pass an explicit
 URL such as `--frontend-url`, that port must be free. Use

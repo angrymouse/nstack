@@ -91,7 +91,9 @@ dev server by default. Agents should use `pnpm devexec '<js>'` from this app
 directory for one-shot checks against a temporary dev stack. From a monorepo
 root, use `pnpm --dir <app-dir> devexec '<js>'` or
 `nstack devexec --cwd <app-dir> '<js>'`. Set `AI_ALLOW_DEVSERVER=1` only when
-an agent truly needs an interactive dev server.
+an agent truly needs an interactive dev server. For Paseo worktrees, run
+`pnpm worktree`; it sets `AI_ALLOW_DEVSERVER=1` and uses `PASEO_PORT` to avoid
+frontend collisions.
 By default, `devexec` moves to the next free frontend or backend port when
 `localhost:3000` or `localhost:4000` is already in use. If you pass an explicit
 URL such as `--frontend-url`, that port must be free. Use

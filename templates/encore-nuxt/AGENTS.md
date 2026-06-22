@@ -17,6 +17,7 @@ Before changing code, read [NSTACK_GUIDELINES.md](./NSTACK_GUIDELINES.md).
 
 - Install/setup: `nstack setup` or `pnpm setup`
 - Develop: `pnpm dev` or `nstack dev`
+- Worktree dev (Paseo): `pnpm worktree`
 - One-shot dev check: `pnpm devexec '<js>'` or `nstack devexec '<js>'`
 - One-shot screenshot: `pnpm devexec 'return await screenshot("/")'`
 - Check: `pnpm check`

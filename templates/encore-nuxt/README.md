@@ -9,6 +9,7 @@ nstack setup
 pnpm dev
 # or
 nstack dev
+pnpm worktree
 nstack devexec 'await apiJson("/status")'
 ```
 
