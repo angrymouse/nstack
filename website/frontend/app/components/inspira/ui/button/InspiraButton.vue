@@ -25,7 +25,7 @@ const variants = {
   quiet:
     "border-transparent bg-transparent text-zinc-300 hover:bg-zinc-900 hover:text-zinc-50 active:bg-zinc-800",
   rainbow:
-    "border-rose-200/45 bg-zinc-950/75 text-zinc-50 shadow-[0_18px_48px_rgba(255,143,189,0.13)] hover:border-amber-200/70 hover:bg-zinc-900/90 active:bg-zinc-950",
+    "border-amber-100/35 bg-zinc-950/80 text-zinc-50 shadow-[0_18px_48px_rgba(255,177,119,0.12)] hover:border-rose-200/55 hover:bg-zinc-900/90 active:bg-zinc-950",
 };
 
 const sizes = {

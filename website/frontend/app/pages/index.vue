@@ -148,7 +148,7 @@ useHead({
           <span class="logo-frame" aria-hidden="true">
             <img src="/assets/nstack-logo.png" alt="" class="size-7 object-contain">
           </span>
-          <span class="pastel-text font-display text-[22px] font-extrabold tracking-normal">
+          <span class="font-display text-[22px] font-extrabold tracking-normal text-zinc-50">
             nstack
           </span>
         </a>
@@ -174,8 +174,8 @@ useHead({
           </a>
         </div>
 
-        <InspiraButton as="a" href="#install" size="sm" variant="rainbow">
-          <span class="pastel-text">Install</span>
+        <InspiraButton as="a" href="#install" size="sm" variant="secondary">
+          Install
         </InspiraButton>
       </nav>
     </header>
@@ -196,7 +196,7 @@ useHead({
 
             <div class="mt-8 flex flex-col gap-3 sm:flex-row">
               <InspiraButton as="a" href="#install" variant="rainbow">
-                <span class="pastel-text">Start in 3 commands</span>
+                Start in 3 commands
                 <PhArrowRight :size="18" weight="bold" class="text-amber-100" aria-hidden="true" />
               </InspiraButton>
               <InspiraButton as="a" href="#workflow" variant="quiet">
