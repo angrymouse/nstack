@@ -5,6 +5,8 @@ import path from "node:path";
 import { test } from "node:test";
 import { runCli } from "../src/cli.js";
 
+const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+
 test("verify honors --cwd", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "nstack-verify-cwd-"));
   writeFileSync(path.join(cwd, "nstack.config.mjs"), `export default {
@@ -326,9 +328,9 @@ test("cli reports version in text and json modes", async () => {
     console.log = originalLog;
   }
 
-  assert.equal(output[0], "nstack 0.1.32");
-  assert.deepEqual(JSON.parse(output[1]), { name: "nstack", version: "0.1.32" });
-  assert.equal(output[2], "nstack 0.1.32");
+  assert.equal(output[0], `nstack ${packageJson.version}`);
+  assert.deepEqual(JSON.parse(output[1]), { name: "nstack", version: packageJson.version });
+  assert.equal(output[2], `nstack ${packageJson.version}`);
 });
 
 test("--ci fails instead of prompting for missing deploy settings", async () => {
