@@ -23,14 +23,6 @@ RUN --mount=type=cache,id=nstack-frontend-pnpm,target=/pnpm/store \
 
 COPY frontend/nuxt.config.ts ./frontend/nuxt.config.ts
 
-WORKDIR /workspace/frontend
-RUN --mount=type=cache,id=nstack-frontend-nuxt,target=/workspace/node_modules/.cache/nuxt \
-  --mount=type=cache,id=nstack-frontend-dotnuxt,target=/workspace/frontend/.nuxt \
-  --mount=type=cache,id=nstack-frontend-vite,target=/workspace/frontend/node_modules/.cache/vite \
-  --mount=type=cache,id=nstack-frontend-jiti,target=/workspace/frontend/node_modules/.cache/jiti \
-  NITRO_PRESET=node-server \
-  ./node_modules/.bin/nuxt prepare --logLevel=silent
-
 WORKDIR /workspace
 COPY frontend/app ./frontend/app
 COPY frontend/public ./frontend/public
