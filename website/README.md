@@ -54,7 +54,7 @@ nstack configure --dokploy-url https://dokploy.example.com --dokploy-api-key <ke
 nstack deploy
 ```
 
-The app domain is `nstack.playground.nik.technology`, and source deploys read
+The app domain is `nstack.tech`, and source deploys read
 `website/deploy/nstack/compose.dokploy.yaml` from this repository.
 
 After that, the usual loop is small:

@@ -2,7 +2,7 @@ export default {
   app: {
     name: "nstack",
     slug: "nstack",
-    domain: "nstack.playground.nik.technology",
+    domain: "nstack.tech",
   },
   paths: {
     frontendContext: ".",

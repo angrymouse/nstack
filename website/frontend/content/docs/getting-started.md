@@ -10,7 +10,7 @@ navigation:
 Install nstack, create the app, prepare local dependencies, and run the stack.
 
 ```bash
-curl -fsSL https://nstack.playground.nik.technology/install.sh | bash
+curl -fsSL https://nstack.tech/install.sh | bash
 nstack init my-app
 cd my-app
 nstack setup

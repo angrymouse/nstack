@@ -19,7 +19,7 @@ import InspiraButton from "~/components/inspira/ui/button/InspiraButton.vue";
 import InspiraSurface from "~/components/inspira/ui/surface/InspiraSurface.vue";
 
 const installCommand =
-  "curl -fsSL https://nstack.playground.nik.technology/install.sh | bash";
+  "curl -fsSL https://nstack.tech/install.sh | bash";
 const discordInvite = "https://discord.gg/zHAJ4Ym5TP";
 const copiedInstall = ref(false);
 let copiedTimer: ReturnType<typeof setTimeout> | undefined;
@@ -535,7 +535,7 @@ const selectedCodeLines = computed(() => highlightSource(selectedCodeFile.value)
 
 const runtimeConfig = useRuntimeConfig();
 const siteUrl = String(
-  runtimeConfig.public.siteUrl || "https://nstack.playground.nik.technology",
+  runtimeConfig.public.siteUrl || "https://nstack.tech",
 ).replace(/\/$/, "");
 const pageTitle = "nstack | Deployment and provisioning for Encore, Nuxt, and Dokploy";
 const pageDescription =

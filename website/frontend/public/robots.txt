@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://nstack.playground.nik.technology/sitemap.xml
+Sitemap: https://nstack.tech/sitemap.xml

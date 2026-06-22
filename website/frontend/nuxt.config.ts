@@ -5,7 +5,7 @@ const backendHost = process.env.NSTACK_BACKEND_HOST || "backend";
 const siteUrl = (
   process.env.NUXT_PUBLIC_SITE_URL ||
   process.env.NSTACK_PUBLIC_SITE_URL ||
-  "https://nstack.playground.nik.technology"
+  "https://nstack.tech"
 ).replace(/\/$/, "");
 const siteTitle = "nstack | Deployment and provisioning for Encore, Nuxt, and Dokploy";
 const siteDescription =

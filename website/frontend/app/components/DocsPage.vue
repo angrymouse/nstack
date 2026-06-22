@@ -20,7 +20,7 @@ const discordInvite = "https://discord.gg/zHAJ4Ym5TP";
 const runtimeConfig = useRuntimeConfig();
 const route = useRoute();
 const siteUrl = String(
-  runtimeConfig.public.siteUrl || "https://nstack.playground.nik.technology",
+  runtimeConfig.public.siteUrl || "https://nstack.tech",
 ).replace(/\/$/, "");
 
 const currentPath = computed(() => {
