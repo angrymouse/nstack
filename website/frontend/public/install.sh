@@ -65,7 +65,7 @@ clone_or_update() {
 
 install_cli() {
   say "Installing nstack dependencies..."
-  (cd "$checkout" && pnpm install --no-frozen-lockfile)
+  (cd "$checkout" && CI=true pnpm install --no-frozen-lockfile)
   chmod +x "$checkout/bin/nstack.js"
   mkdir -p "$bin_dir"
   ln -sfn "$checkout/bin/nstack.js" "$bin_dir/nstack"

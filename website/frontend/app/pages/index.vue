@@ -659,7 +659,7 @@ useHead({
             </div>
 
             <h1 class="mx-auto max-w-[64rem] text-balance font-display text-5xl font-extrabold leading-tight tracking-tight text-zinc-50 sm:text-6xl md:text-6xl">
-              Develop scalable, opinionated, <span class="pastel-text">AI-focused</span> full stack apps.
+              Develop scalable, opinionated, <span class="pastel-text">AI-hardened</span> full stack apps.
             </h1>
             <p class="mx-auto mt-6 max-w-2xl text-pretty text-[19px] font-semibold leading-8 text-zinc-300 md:text-[21px]">
               nstack is the deployment and provisioning tool for Encore + Nuxt

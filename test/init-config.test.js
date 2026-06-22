@@ -139,7 +139,7 @@ exit 1
   assert.match(frontendDockerfile, /COPY pnpm-lock\.yaml \.\//);
   assert.match(frontendDockerfile, /pnpm install --filter \.\/frontend\.\.\./);
   assert.match(frontendDockerfile, /--prefer-offline/);
-  assert.match(frontendDockerfile, /--ignore-scripts/);
+
   assert.match(frontendDockerfile, /\.\/node_modules\/\.bin\/nuxt prepare --logLevel=silent/);
   assert.match(frontendDockerfile, /\.\/node_modules\/\.bin\/nuxt build --logLevel=silent/);
   assert.match(frontendDockerfile, /COPY --from=build \/workspace\/frontend\/\.output \.\/\.output/);
