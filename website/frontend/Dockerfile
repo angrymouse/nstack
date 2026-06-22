@@ -7,7 +7,7 @@ ENV PATH="${PNPM_HOME}:${PATH}"
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 WORKDIR /workspace
 
-RUN corepack enable && corepack prepare pnpm@10.33.2 --activate
+RUN corepack enable && corepack prepare pnpm@10.18.3 --activate
 
 ENV NUXT_TELEMETRY_DISABLED=1
 
@@ -19,8 +19,7 @@ COPY frontend/package.json ./frontend/package.json
 
 RUN --mount=type=cache,id=nstack-frontend-pnpm,target=/pnpm/store \
   pnpm config set store-dir /pnpm/store \
-  && pnpm install --filter ./frontend... --prefer-offline --frozen-lockfile=false \
-  && pnpm approve-builds --all
+  && pnpm install --filter ./frontend... --prefer-offline --frozen-lockfile=false
 
 COPY frontend/nuxt.config.ts ./frontend/nuxt.config.ts
 
