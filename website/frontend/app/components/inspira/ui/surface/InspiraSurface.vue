@@ -25,7 +25,7 @@ const tones = {
 
 const classes = computed(() =>
   cn(
-    "relative overflow-hidden rounded-xl border text-zinc-100",
+    "squircle-xl relative overflow-hidden border text-zinc-100",
     tones[props.tone],
     props.class,
   ),

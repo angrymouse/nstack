@@ -117,7 +117,7 @@ useHead({
   <div class="min-h-dvh text-zinc-100">
     <a
       href="#main"
-      class="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-zinc-100 focus:px-4 focus:py-3 focus:font-sans focus:font-extrabold focus:text-zinc-950"
+      class="sr-only focus:not-sr-only focus:squircle-sm focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:bg-zinc-100 focus:px-4 focus:py-3 focus:font-sans focus:font-extrabold focus:text-zinc-950"
     >
       Skip to content
     </a>
@@ -129,7 +129,7 @@ useHead({
       >
         <a href="#main" class="flex items-center gap-3 text-zinc-50">
           <span
-            class="grid size-9 place-items-center rounded-lg border border-zinc-700 bg-zinc-900"
+            class="squircle-sm grid size-9 place-items-center border border-zinc-700 bg-zinc-900"
             aria-hidden="true"
           >
             <PhStack :size="20" weight="bold" />
@@ -142,19 +142,19 @@ useHead({
         <div class="hidden items-center gap-1 md:flex">
           <a
             href="#workflow"
-            class="rounded-md px-3 py-2 text-[14px] font-bold text-zinc-300 transition hover:bg-zinc-900 hover:text-zinc-50"
+            class="squircle-sm px-3 py-2 text-[14px] font-bold text-zinc-300 transition hover:bg-zinc-900 hover:text-zinc-50"
           >
             Workflow
           </a>
           <a
             href="#deploy"
-            class="rounded-md px-3 py-2 text-[14px] font-bold text-zinc-300 transition hover:bg-zinc-900 hover:text-zinc-50"
+            class="squircle-sm px-3 py-2 text-[14px] font-bold text-zinc-300 transition hover:bg-zinc-900 hover:text-zinc-50"
           >
             Deploy
           </a>
           <a
             href="#commands"
-            class="rounded-md px-3 py-2 text-[14px] font-bold text-zinc-300 transition hover:bg-zinc-900 hover:text-zinc-50"
+            class="squircle-sm px-3 py-2 text-[14px] font-bold text-zinc-300 transition hover:bg-zinc-900 hover:text-zinc-50"
           >
             Commands
           </a>
@@ -199,7 +199,7 @@ useHead({
             </div>
             <button
               type="button"
-              class="inline-flex size-10 shrink-0 items-center justify-center rounded-md border border-zinc-700 bg-zinc-900 text-zinc-200 transition hover:border-zinc-500 hover:text-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100/70 active:translate-y-px"
+              class="squircle-sm inline-flex size-10 shrink-0 items-center justify-center border border-zinc-700 bg-zinc-900 text-zinc-200 transition hover:border-zinc-500 hover:text-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100/70 active:translate-y-px"
               :aria-label="copiedInstall ? 'Install command copied' : 'Copy install command'"
               @click="copyInstall"
             >
@@ -207,7 +207,7 @@ useHead({
               <PhCopy v-else :size="19" weight="bold" />
             </button>
           </div>
-          <pre class="mt-5 whitespace-pre-wrap break-all rounded-lg border border-zinc-800 bg-zinc-950 p-4 text-[13px] leading-6 text-zinc-200"><code>{{ installCommand }}</code></pre>
+          <pre class="squircle-md mt-5 whitespace-pre-wrap break-all border border-zinc-800 bg-zinc-950 p-4 text-[13px] leading-6 text-zinc-200"><code>{{ installCommand }}</code></pre>
         </InspiraSurface>
       </section>
 
@@ -220,14 +220,14 @@ useHead({
             class="p-5"
           >
             <div class="flex items-center gap-3">
-              <span class="grid size-10 place-items-center rounded-lg bg-zinc-800 text-zinc-100">
+              <span class="squircle-sm grid size-10 place-items-center bg-zinc-800 text-zinc-100">
                 <component :is="item.icon" :size="21" weight="bold" />
               </span>
               <p class="font-display text-xl font-extrabold text-zinc-50">
                 {{ item.label }}
               </p>
             </div>
-            <pre class="mt-5 whitespace-pre-wrap break-all rounded-lg bg-zinc-950 p-3 text-[12px] font-semibold leading-5 text-zinc-300"><code>{{ item.command }}</code></pre>
+            <pre class="squircle-md mt-5 whitespace-pre-wrap break-all bg-zinc-950 p-3 text-[12px] font-semibold leading-5 text-zinc-300"><code>{{ item.command }}</code></pre>
           </InspiraSurface>
         </div>
       </section>
@@ -251,7 +251,7 @@ useHead({
               tone="flat"
               class="grid gap-5 p-5 md:grid-cols-[3.5rem_1fr] md:p-6"
             >
-              <div class="grid size-14 place-items-center rounded-lg border border-zinc-800 bg-zinc-900 text-zinc-100">
+              <div class="squircle-md grid size-14 place-items-center border border-zinc-800 bg-zinc-900 text-zinc-100">
                 <component :is="step.icon" :size="27" weight="bold" />
               </div>
               <div>
@@ -270,7 +270,7 @@ useHead({
       <section class="mx-auto max-w-6xl px-5 py-12 md:px-8 md:py-20">
         <InspiraSurface class="grid gap-0 lg:grid-cols-[1.05fr_0.95fr]">
           <div class="p-5 md:p-8">
-            <div class="rounded-lg border border-zinc-800 bg-zinc-950">
+            <div class="squircle-lg border border-zinc-800 bg-zinc-950">
               <div class="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
                 <div class="flex items-center gap-2 text-[13px] font-extrabold text-zinc-200">
                   <PhFolderSimple :size="17" weight="bold" aria-hidden="true" />
@@ -309,7 +309,7 @@ export const hello = api(
               client location, local scripts, and deploy files nstack manages.
             </p>
 
-            <div class="mt-7 rounded-lg border border-zinc-800 bg-zinc-950 p-4">
+            <div class="squircle-lg mt-7 border border-zinc-800 bg-zinc-950 p-4">
               <div class="flex items-center gap-2 text-[13px] font-bold text-zinc-500">
                 <PhGitBranch :size="17" weight="bold" aria-hidden="true" />
                 <span>Generated project</span>
@@ -327,7 +327,7 @@ package.json</code></pre>
       <section id="deploy" class="mx-auto max-w-6xl px-5 py-12 md:px-8 md:py-20">
         <div class="grid gap-6 lg:grid-cols-[0.95fr_1.05fr] lg:items-stretch">
           <InspiraSurface class="p-5 md:p-8">
-            <div class="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950">
+            <div class="squircle-lg overflow-hidden border border-zinc-800 bg-zinc-950">
               <img
                 src="/assets/nstack-deploy.webp"
                 alt="Dokploy deployment view for an nstack app"
@@ -351,7 +351,7 @@ package.json</code></pre>
                 <div
                   v-for="item in deployChecks"
                   :key="item"
-                  class="flex gap-3 rounded-lg border border-zinc-800 bg-zinc-950 p-4"
+                  class="squircle-lg flex gap-3 border border-zinc-800 bg-zinc-950 p-4"
                 >
                   <PhCheckCircle :size="20" weight="bold" class="mt-0.5 shrink-0 text-zinc-200" />
                   <span class="text-[15px] font-bold leading-6 text-zinc-300">
@@ -384,7 +384,7 @@ package.json</code></pre>
               the Dokploy target is ready.
             </p>
           </div>
-          <div class="grid gap-2 rounded-lg border border-zinc-800 bg-zinc-950 p-4 text-[13px] font-semibold leading-6 text-zinc-300">
+          <div class="squircle-lg grid gap-2 border border-zinc-800 bg-zinc-950 p-4 text-[13px] font-semibold leading-6 text-zinc-300">
             <span>nstack init my-app</span>
             <span>cd my-app</span>
             <span>nstack dev</span>

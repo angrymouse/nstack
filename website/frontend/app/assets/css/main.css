@@ -35,3 +35,30 @@
     font-family: var(--font-mono);
   }
 }
+
+@layer utilities {
+  .squircle-xs {
+    border-radius: 0.45rem;
+    corner-shape: squircle;
+  }
+
+  .squircle-sm {
+    border-radius: 0.65rem;
+    corner-shape: squircle;
+  }
+
+  .squircle-md {
+    border-radius: 0.85rem;
+    corner-shape: squircle;
+  }
+
+  .squircle-lg {
+    border-radius: 1.05rem;
+    corner-shape: squircle;
+  }
+
+  .squircle-xl {
+    border-radius: 1.35rem;
+    corner-shape: squircle;
+  }
+}

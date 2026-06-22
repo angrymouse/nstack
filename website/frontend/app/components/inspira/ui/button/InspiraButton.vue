@@ -33,7 +33,7 @@ const sizes = {
 
 const classes = computed(() =>
   cn(
-    "inline-flex items-center justify-center gap-2 rounded-md border font-sans font-extrabold leading-none tracking-normal transition duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100/70 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 active:translate-y-px disabled:pointer-events-none disabled:opacity-50",
+    "squircle-sm inline-flex items-center justify-center gap-2 border font-sans font-extrabold leading-none tracking-normal transition duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-100/70 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 active:translate-y-px disabled:pointer-events-none disabled:opacity-50",
     variants[props.variant],
     sizes[props.size],
     props.class,
