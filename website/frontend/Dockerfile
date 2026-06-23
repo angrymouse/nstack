@@ -22,6 +22,7 @@ RUN --mount=type=cache,id=nstack-frontend-pnpm,target=/pnpm/store \
   && pnpm install --filter ./frontend... --prefer-offline --frozen-lockfile=false
 
 COPY frontend/nuxt.config.ts ./frontend/nuxt.config.ts
+COPY frontend/content ./frontend/content
 
 WORKDIR /workspace
 COPY frontend/app ./frontend/app
