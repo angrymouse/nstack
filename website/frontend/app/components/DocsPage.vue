@@ -25,7 +25,10 @@ const siteUrl = String(
 
 const currentPath = computed(() => {
   const slug = route.params.slug;
-  const parts = Array.isArray(slug) ? slug : slug ? [String(slug)] : [];
+  const parts = Array.isArray(slug) ? [...slug] : slug ? [String(slug)] : [];
+  if (parts[parts.length - 1] === "index") {
+    parts.pop();
+  }
   return `/docs${parts.length > 0 ? `/${parts.join("/")}` : ""}`;
 });
 
