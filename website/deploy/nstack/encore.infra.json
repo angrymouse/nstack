@@ -33,7 +33,7 @@
   "secrets": {},
   "redis": {
     "release-metadata": {
-      "host": "nstack-redis:6379",
+      "host": "nstack-redis-ryoug1:6379",
       "database_index": 0,
       "key_prefix": "nstack:release-metadata:",
       "in_memory": false,
