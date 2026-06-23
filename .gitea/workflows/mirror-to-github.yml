@@ -1,0 +1,49 @@
+name: Mirror to GitHub
+
+on:
+  push:
+    branches:
+      - '**'
+    tags:
+      - '**'
+  workflow_dispatch:
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Push Gitea refs to GitHub
+        env:
+          GH_MIRROR_TOKEN: ${{ secrets.GH_MIRROR_TOKEN }}
+          GH_MIRROR_REPOSITORY: angrymouse/nstack
+          GITEA_REPOSITORY: https://git.nik.technology/angrymouse/nstack.git
+        run: |
+          set -euo pipefail
+
+          if [ -z "$GH_MIRROR_TOKEN" ]; then
+            echo "Set the GH_MIRROR_TOKEN repository secret to a GitHub token with Contents: read and write access."
+            exit 1
+          fi
+
+          workdir="$(mktemp -d)"
+          askpass="$(mktemp)"
+          trap 'rm -rf "$workdir" "$askpass"' EXIT
+
+          cat > "$askpass" <<'EOF'
+          #!/bin/sh
+          case "$1" in
+            *Username*) printf '%s\n' 'x-access-token' ;;
+            *Password*) printf '%s\n' "$GH_MIRROR_TOKEN" ;;
+            *) printf '\n' ;;
+          esac
+          EOF
+          chmod 700 "$askpass"
+
+          git init --bare "$workdir/repo.git"
+          cd "$workdir/repo.git"
+
+          git remote add gitea "$GITEA_REPOSITORY"
+          git fetch --prune gitea '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*'
+
+          GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 \
+            git -c credential.helper= push --prune "https://github.com/${GH_MIRROR_REPOSITORY}.git" '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*'
