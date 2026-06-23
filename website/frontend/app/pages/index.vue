@@ -21,6 +21,7 @@ import InspiraSurface from "~/components/inspira/ui/surface/InspiraSurface.vue";
 const installCommand =
   "curl -fsSL https://nstack.tech/install.sh | bash";
 const discordInvite = "https://discord.gg/zHAJ4Ym5TP";
+const gitRepoUrl = "https://git.nik.technology/angrymouse/nstack";
 const copiedInstall = ref(false);
 let copiedTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -640,6 +641,14 @@ useHead({
           >
             Docs
           </a>
+          <a
+            :href="gitRepoUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="squircle-sm px-3 py-2 text-[14px] font-bold text-zinc-300 transition hover:bg-zinc-900 hover:text-zinc-50"
+          >
+            Git
+          </a>
         </div>
 
         <InspiraButton as="a" href="#install" size="sm" variant="secondary">
@@ -687,8 +696,15 @@ useHead({
                 <PhDiscordLogo :size="18" weight="bold" aria-hidden="true" />
                 Join Discord
               </InspiraButton>
-              <InspiraButton as="a" href="#workflow" variant="quiet">
-                See architecture
+              <InspiraButton
+                as="a"
+                :href="gitRepoUrl"
+                target="_blank"
+                rel="noopener noreferrer"
+                variant="quiet"
+              >
+                <PhGitBranch :size="18" weight="bold" aria-hidden="true" />
+                View Git repo
               </InspiraButton>
             </div>
 
@@ -1004,6 +1020,14 @@ useHead({
           <a href="#workflow" class="transition hover:text-zinc-100">Workflow</a>
           <a href="#deploy" class="transition hover:text-zinc-100">Deploy</a>
           <a href="/docs" class="transition hover:text-zinc-100">Docs</a>
+          <a
+            :href="gitRepoUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="transition hover:text-zinc-100"
+          >
+            Git
+          </a>
           <a
             :href="discordInvite"
             target="_blank"

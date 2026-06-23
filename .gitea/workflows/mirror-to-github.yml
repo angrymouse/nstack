@@ -1,0 +1,32 @@
+name: Mirror to GitHub
+
+on:
+  push:
+    branches:
+      - '**'
+    tags:
+      - '**'
+  workflow_dispatch:
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push all refs to GitHub
+        env:
+          GH_MIRROR_TOKEN: ${{ secrets.GH_MIRROR_TOKEN }}
+          GH_MIRROR_REPOSITORY: angrymouse/nstack
+        run: |
+          if [ -z "$GH_MIRROR_TOKEN" ]; then
+            echo "Set the GH_MIRROR_TOKEN repository secret to a GitHub fine-grained token with Contents: read and write access."
+            exit 1
+          fi
+
+          git remote add github "https://x-access-token:${GH_MIRROR_TOKEN}@github.com/${GH_MIRROR_REPOSITORY}.git"
+          git fetch origin '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*'
+          git -c credential.helper= push --prune github '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*'

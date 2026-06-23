@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { PhArrowLeft, PhDiscordLogo } from "@phosphor-icons/vue";
+import { PhArrowLeft, PhDiscordLogo, PhGitBranch } from "@phosphor-icons/vue";
 import InspiraButton from "~/components/inspira/ui/button/InspiraButton.vue";
 
 type NavigationItem = {
@@ -17,6 +17,7 @@ type TocLink = {
 };
 
 const discordInvite = "https://discord.gg/zHAJ4Ym5TP";
+const gitRepoUrl = "https://git.nik.technology/angrymouse/nstack";
 const runtimeConfig = useRuntimeConfig();
 const route = useRoute();
 const siteUrl = String(
@@ -171,6 +172,14 @@ useHead({
           >
             Docs
           </a>
+          <a
+            :href="gitRepoUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="squircle-sm px-3 py-2 text-[14px] font-bold text-zinc-300 transition hover:bg-zinc-900 hover:text-zinc-50"
+          >
+            Git
+          </a>
         </div>
 
         <InspiraButton as="a" href="/#install" size="sm" variant="secondary">
@@ -206,15 +215,26 @@ useHead({
           </NuxtLink>
         </nav>
 
-        <a
-          :href="discordInvite"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="squircle-sm mt-6 hidden items-center gap-2 border border-zinc-800 bg-zinc-950 px-3 py-2 text-[13px] font-bold text-zinc-300 transition hover:border-zinc-700 hover:text-zinc-50 lg:inline-flex"
-        >
-          <PhDiscordLogo :size="17" weight="bold" aria-hidden="true" />
-          Discord
-        </a>
+        <div class="mt-6 hidden gap-2 lg:grid">
+          <a
+            :href="gitRepoUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="squircle-sm inline-flex items-center gap-2 border border-zinc-800 bg-zinc-950 px-3 py-2 text-[13px] font-bold text-zinc-300 transition hover:border-zinc-700 hover:text-zinc-50"
+          >
+            <PhGitBranch :size="17" weight="bold" aria-hidden="true" />
+            Git repo
+          </a>
+          <a
+            :href="discordInvite"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="squircle-sm inline-flex items-center gap-2 border border-zinc-800 bg-zinc-950 px-3 py-2 text-[13px] font-bold text-zinc-300 transition hover:border-zinc-700 hover:text-zinc-50"
+          >
+            <PhDiscordLogo :size="17" weight="bold" aria-hidden="true" />
+            Discord
+          </a>
+        </div>
       </aside>
 
       <article class="min-w-0 px-0 lg:px-12 lg:py-7 xl:px-16 2xl:px-20">
