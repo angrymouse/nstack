@@ -11,6 +11,9 @@ pnpm dev
 nstack dev
 pnpm worktree
 nstack devexec 'await apiJson("/status")'
+pnpm check
+# or
+nstack check
 ```
 
 `nstack init` installs dependencies and approves pnpm build scripts before the
@@ -21,16 +24,16 @@ declared Encore resources need it.
 
 The Nuxt frontend calls Encore through `apiClient()` in
 `frontend/app/utils/api.ts`, backed by the generated client in
-`frontend/app/generated/encore-client.ts`. `pnpm dev` and `nstack dev` run the
-same local orchestrator: Encore backend, generated client watcher, and Nuxt
-frontend. On a fresh clone, `pnpm dev` and `pnpm check` reuse the same local
-setup path before starting work. They stop with direct instructions when Docker
-is not running or cannot be accessed. The watcher only rewrites the client when
-the generated output changes, so Nuxt HMR is not triggered by backend edits that
-leave the API surface unchanged. `pnpm check`, `pnpm build`, and `nstack deploy`
-keep it updated automatically. Use `nstack client gen` only when you explicitly
-want to regenerate it. Generation and deploy metadata use local Encore commands
-for Dokploy/nstack targets; Encore Cloud login is not required.
+`frontend/app/generated/encore-client.ts`. `pnpm dev` calls `nstack dev`, which
+runs the Encore backend, generated client watcher, and Nuxt frontend. On a fresh
+clone, `pnpm dev` and `pnpm check` reuse the CLI setup path before starting
+work. They stop with direct instructions when Docker is not running or cannot be
+accessed. The watcher only rewrites the client when the generated output
+changes, so Nuxt HMR is not triggered by backend edits that leave the API
+surface unchanged. `pnpm check`, `pnpm build`, and `nstack deploy` keep it
+updated automatically. Use `nstack client gen` only when you explicitly want to
+regenerate it. Generation and deploy metadata use local Encore commands for
+Dokploy/nstack targets.
 
 `backend/encore.app` intentionally leaves the Encore app id empty. That keeps
 local `encore run` and `encore check` in Encore's local-only mode so they do not
@@ -58,6 +61,8 @@ After that, the usual loop is small:
 
 ```sh
 pnpm check
+# or
+nstack check
 nstack deploy
 nstack status
 ```

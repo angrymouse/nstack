@@ -20,7 +20,7 @@ Before changing code, read [NSTACK_GUIDELINES.md](./NSTACK_GUIDELINES.md).
 - Worktree dev (Paseo): `pnpm worktree`
 - One-shot dev check: `pnpm devexec '<js>'` or `nstack devexec '<js>'`
 - One-shot screenshot: `pnpm devexec 'return await screenshot("/")'`
-- Check: `pnpm check`
+- Check: `pnpm check` or `nstack check`
 - Deploy: `nstack deploy`
 - Status: `nstack status`
 - Backup: `nstack backup`
@@ -110,17 +110,17 @@ Failed deploys print a Dokploy log tail when one is available. Use `nstack logs 
 - Use `apiClient()` from `frontend/app/utils/api.ts` for frontend calls to
   Encore APIs. Normal `pnpm dev`/`nstack dev`, `pnpm check`, `pnpm build`, and
   `nstack deploy` commands keep `frontend/app/generated/encore-client.ts`
-  in sync using local Encore metadata; Encore Cloud login is not required.
+  in sync using local Encore metadata.
 - Keep `backend/encore.app` `id` empty unless intentionally linking the repo to
   Encore Cloud. nstack uses `nstack.config.mjs` `app.slug` as the Dokploy/nstack
   identity; an empty Encore id keeps local `encore run` and `encore check` from
   fetching Encore Cloud secrets.
-- Keep `scripts/nstack-local.mjs` in the local setup/dev/check path so fresh
-  clones install dependencies, bootstrap pnpm through Corepack, install the
-  Encore CLI when it is missing, and stop with clear Docker instructions only
-  when Docker is needed but unavailable. Under AI coding harnesses, use
-  `pnpm devexec '<js>'` from the app directory for one-shot dev-server checks.
-  From a monorepo root, use `pnpm --dir <app-dir> devexec '<js>'` or
+- Use the CLI-owned setup/dev/check path so fresh clones install dependencies,
+  bootstrap pnpm through Corepack, install the Encore CLI when it is missing,
+  and stop with clear Docker instructions only when Docker is needed but
+  unavailable. Under AI coding harnesses, use `pnpm devexec '<js>'` from the app
+  directory for one-shot dev-server checks. From a monorepo root, use
+  `pnpm --dir <app-dir> devexec '<js>'` or
   `nstack devexec --cwd <app-dir> '<js>'`. Use
   `screenshot("/", { width: 390, height: 844 })` inside devexec for page
   screenshots; it writes under `.nstack/screenshots` unless a path is passed.
@@ -138,4 +138,4 @@ Failed deploys print a Dokploy log tail when one is available. Use `nstack logs 
 - Use `nstack env set`, `nstack env pull`, and `nstack env push` for runtime
   secrets. Never commit secret values.
 - Keep generated deploy files and `.nstack/` state out of manual edits.
-- Run `pnpm check` before considering the change complete.
+- Run `pnpm check` or `nstack check` before considering the change complete.

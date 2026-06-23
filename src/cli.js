@@ -1,7 +1,7 @@
 import path from "node:path";
 import { symlinkSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { backup } from "./backup.js";
+import { runCheck } from "./check.js";
 import { runClientGenerator } from "./client.js";
 import { cleanup } from "./cleanup.js";
 import { configure, deploy, redeploy, rollback, verify, waitForDeployment } from "./deploy.js";
@@ -29,9 +29,10 @@ import { runSetup } from "./setup.js";
 import { showStatus } from "./status.js";
 import { runTargetCommand } from "./targets.js";
 import { undeploy } from "./undeploy.js";
-import { commandOutput, copyTree, ensureDir, fileExists, mergeEnvFile, readJSON, removeIfExists, run, slugify } from "./util.js";
+import { maybePrintUpdateNotice, printUpdateReport, runUpdateCommand } from "./update.js";
+import { commandOutput, copyTree, ensureDir, fileExists, mergeEnvFile, removeIfExists, run, slugify } from "./util.js";
+import { packageRoot, printVersion } from "./version.js";
 
-const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const booleanOptions = new Set([
   "help",
   "version",
@@ -114,13 +115,24 @@ const valueOptions = new Set([
   "backendUrl",
   "apiUrl",
   "waitUrl",
+  "metadataUrl",
+  "repo",
+  "ref",
+  "binDir",
 ]);
 
 export async function runCli(argv) {
   const { command, rest } = splitCommand(argv);
   const { args, options } = parseArgs(rest);
-  if (command === "version" || command === "-v" || command === "--version" || options.version) return version(options);
+  const result = await runCommand(command, args, options);
+  await maybePrintUpdateNotice({ command, options });
+  return result;
+}
+
+async function runCommand(command, args, options) {
+  if (command === "version" || command === "-v" || command === "--version" || options.version) return printVersion(options);
   if (command === "help" || command === "-h" || command === "--help" || options.help) return help();
+  if (command === "update" || command === "self-update") return update(options);
   if (command === "init") return init(args[0] || ".", options);
   if (command === "configure" || command === "config" || command === "link") return configure(options);
   if (command === "unlink") return unlink(options);
@@ -138,6 +150,7 @@ export async function runCli(argv) {
   if (command === "setup" || command === "install") return setup(args, options);
   if (command === "dev") return dev(args, options);
   if (command === "devexec" || command === "dev-exec") return devexec(args, options);
+  if (command === "check") return check(options);
   if (command === "client") return client(args, options);
   if (command === "env" || command === "secret" || command === "secrets") return runSecretCommand(args, options);
   if (command === "build") return deploy({ ...options, buildOnly: true, skipVerify: true, skipStatus: true });
@@ -154,6 +167,10 @@ export async function runCli(argv) {
 
 async function client(args, options = {}) {
   const cwd = options.cwd || process.cwd();
+  if ((args[0] || "gen") === "watch") {
+    const { watchClient } = await import("./client.js");
+    return watchClient(cwd, { capture: Boolean(options.json) });
+  }
   const report = runClientGenerator(cwd, args[0] || "gen", {
     capture: Boolean(options.json),
     force: Boolean(options.force),
@@ -164,7 +181,7 @@ async function client(args, options = {}) {
 
 async function dev(args, options = {}) {
   const cwd = options.cwd || process.cwd();
-  const report = runDev(cwd, args, { capture: Boolean(options.json) });
+  const report = await runDev(cwd, args, { capture: Boolean(options.json) });
   if (options.json) console.log(JSON.stringify(report, null, 2));
   return report;
 }
@@ -178,7 +195,7 @@ async function setup(args, options = {}) {
 
 async function devexec(args, options = {}) {
   const cwd = options.cwd || process.cwd();
-  const report = runDevExec(cwd, args, {
+  const report = await runDevExec(cwd, args, {
     capture: false,
     code: options.code,
     file: options.file,
@@ -190,6 +207,19 @@ async function devexec(args, options = {}) {
     timeoutMs: options.timeoutMs,
   });
   if (options.json) console.log(JSON.stringify(report, null, 2));
+  return report;
+}
+
+async function check(options = {}) {
+  const cwd = options.cwd || process.cwd();
+  const report = runCheck(cwd, { ...options, capture: Boolean(options.json) });
+  if (options.json) console.log(JSON.stringify(report, null, 2));
+  return report;
+}
+
+async function update(options = {}) {
+  const report = await runUpdateCommand(options);
+  printUpdateReport(report, options);
   return report;
 }
 
@@ -1133,6 +1163,8 @@ Daily commands:
   nstack setup                   install local tooling and project dependencies
   nstack dev                     run Encore, Nuxt, and client sync for local HMR
   nstack devexec '<js>'          run one-shot JS against a temporary dev stack
+  nstack check                   run client sync, Encore check, tsc, and Nuxt prepare
+  nstack update                  update this git-installed nstack checkout
   nstack deploy                  build, deploy, verify, and print the URL
   nstack status                  show the current release and Dokploy state
   nstack env set <name>          save an app runtime secret locally
@@ -1179,6 +1211,9 @@ Configure:
   --skip-install                 skip init dependency install and pnpm build approvals
   --skip-tools                   check tools without bootstrapping pnpm or Encore
   --skip-docker                  skip local Docker daemon checks in setup/dev/check
+  --metadata-url <url>           release metadata URL for nstack update checks
+  --repo <git-url>               git repository used by nstack update
+  --ref <name>                   git branch or ref used by nstack update
 
 Deploy:
   --no-wait                      trigger deploy and return before verification/status
@@ -1192,20 +1227,10 @@ Other useful flags:
   --stage                        save env without redeploying
   --print, --no-browser          print URLs without launching a browser
   --check                        exit nonzero when doctor/status finds a problem
+                                or only check for updates with nstack update
   --version, -v                  print nstack version
   --yes                          fail instead of prompting for missing values
   NSTACK_BACKUP_DESTINATION_ID   Dokploy backup destination used for local backups
   NSTACK_NO_BACKUPS_ON_DELETION  allow destructive deletion without local backups
 `);
-}
-
-function version(options = {}) {
-  const pkg = readJSON(path.join(packageRoot, "package.json"), {});
-  const report = {
-    name: pkg.name || "nstack",
-    version: pkg.version || "0.0.0",
-  };
-  if (options.json) console.log(JSON.stringify(report, null, 2));
-  else console.log(`${report.name} ${report.version}`);
-  return report;
 }

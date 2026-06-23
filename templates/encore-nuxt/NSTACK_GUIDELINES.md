@@ -65,16 +65,16 @@ targets and does not point at Encore Cloud environments.
 `nstack setup` or `pnpm setup` installs dependencies, bootstraps pnpm through
 Corepack when needed, installs the Encore CLI with the official installer when
 it is missing, and checks Docker only when declared Encore resources need it.
-`pnpm dev` and `nstack dev` run the same local orchestrator: Encore backend,
-generated client watcher, and Nuxt frontend. On a fresh clone, `pnpm dev` and
-`pnpm check` reuse the same local setup path before starting work. They stop
-with direct instructions when Docker is not running or cannot be accessed. The
-watcher only rewrites the client when the generated output changes, so Nuxt HMR
-is not triggered by backend edits that leave the API surface unchanged.
-`pnpm check`, `pnpm build`, and `nstack deploy` also sync it automatically. Use
-`nstack client gen` only when you explicitly want to regenerate the client
-outside the normal workflow. Generation and deploy metadata use local Encore
-commands for Dokploy/nstack targets; Encore Cloud login is not required.
+`pnpm dev` calls `nstack dev`, which runs the Encore backend, generated client
+watcher, and Nuxt frontend. On a fresh clone, `pnpm dev` and `pnpm check` reuse
+the CLI setup path before starting work. They stop with direct instructions when
+Docker is not running or cannot be accessed. The watcher only rewrites the
+client when the generated output changes, so Nuxt HMR is not triggered by
+backend edits that leave the API surface unchanged. `pnpm check`, `pnpm build`,
+and `nstack deploy` also sync it automatically. Use `nstack client gen` only
+when you explicitly want to regenerate the client outside the normal workflow.
+Generation and deploy metadata use local Encore commands for Dokploy/nstack
+targets.
 Client generation uses ignored temp files under `.nstack/tmp` and removes them
 after each run. On startup, it prunes stale client temp files from interrupted
 runs.

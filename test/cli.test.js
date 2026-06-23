@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { runCli } from "../src/cli.js";
+import { compareVersions } from "../src/update.js";
 
 const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 
@@ -144,97 +145,122 @@ test("cli allows option values that start with -- through equals syntax", async 
   assert.equal(report.app.slug, "demo");
 });
 
-test("cli runs the generated app client generator", async () => {
+test("cli skips client generation outside an nstack app", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "nstack-client-cli-"));
-  mkdirSync(path.join(cwd, "scripts"), { recursive: true });
-  writeFileSync(path.join(cwd, "scripts", "nstack-client.mjs"), `
-import { writeFileSync } from "node:fs";
-writeFileSync("client-ran.txt", process.argv.slice(2).join(" "));
-`);
 
   const output = [];
   const originalLog = console.log;
   try {
     console.log = (value = "") => output.push(String(value));
     const report = await runCli(["--cwd", cwd, "client", "gen", "--force", "--json"]);
-    assert.deepEqual(report, { skipped: false, mode: "gen" });
+    assert.deepEqual(report, { skipped: true });
   } finally {
     console.log = originalLog;
   }
 
-  assert.equal(existsSync(path.join(cwd, "client-ran.txt")), true);
-  assert.equal(readFileSync(path.join(cwd, "client-ran.txt"), "utf8"), "gen --force");
-  assert.deepEqual(JSON.parse(output.join("\n")), { skipped: false, mode: "gen" });
+  assert.deepEqual(JSON.parse(output.join("\n")), { skipped: true });
 });
 
-test("cli runs the generated app dev orchestrator", async () => {
+test("cli rejects dev outside an nstack app", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "nstack-dev-cli-"));
-  mkdirSync(path.join(cwd, "scripts"), { recursive: true });
-  writeFileSync(path.join(cwd, "scripts", "dev.mjs"), `
-import { writeFileSync } from "node:fs";
-writeFileSync("dev-ran.txt", "ok");
-`);
 
-  const output = [];
-  const originalLog = console.log;
-  const originalAllow = process.env.AI_ALLOW_DEVSERVER;
-  try {
-    process.env.AI_ALLOW_DEVSERVER = "1";
-    console.log = (value = "") => output.push(String(value));
-    const report = await runCli(["--cwd", cwd, "dev", "--json"]);
-    assert.equal(report.script, "scripts/dev.mjs");
-    assert.equal(typeof report.harness.detected, "boolean");
-  } finally {
-    console.log = originalLog;
-    if (originalAllow === undefined) delete process.env.AI_ALLOW_DEVSERVER;
-    else process.env.AI_ALLOW_DEVSERVER = originalAllow;
-  }
-
-  assert.equal(existsSync(path.join(cwd, "dev-ran.txt")), true);
-  assert.equal(readFileSync(path.join(cwd, "dev-ran.txt"), "utf8"), "ok");
-  const json = JSON.parse(output.join("\n"));
-  assert.equal(json.script, "scripts/dev.mjs");
-  assert.equal(typeof json.harness.detected, "boolean");
+  await assert.rejects(
+    () => runCli(["--cwd", cwd, "dev"]),
+    /requires an nstack app root/,
+  );
 });
 
-test("cli runs the generated app setup runner", async () => {
+test("cli runs generated app setup in the CLI", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "nstack-setup-cli-"));
-  mkdirSync(path.join(cwd, "scripts"), { recursive: true });
-  writeFileSync(path.join(cwd, "scripts", "nstack-local.mjs"), `
-import { writeFileSync } from "node:fs";
-writeFileSync("setup-ran.txt", process.argv.slice(2).join("\\n"));
-`);
+  const fakeBin = path.join(cwd, "bin");
+  mkdirSync(fakeBin, { recursive: true });
+  writeFileSync(path.join(cwd, "nstack.config.mjs"), "export default { app: { name: 'App', slug: 'app' } };\n");
+  writeFileSync(path.join(cwd, "package.json"), "{\"private\":true}\n");
+  writeFileSync(path.join(fakeBin, "pnpm"), "#!/usr/bin/env sh\nif [ \"$1\" = \"--version\" ]; then printf '10.18.3\\n'; exit 0; fi\nexit 0\n");
+  chmodSync(path.join(fakeBin, "pnpm"), 0o755);
 
   const output = [];
   const originalLog = console.log;
+  const originalPath = process.env.PATH;
   try {
+    process.env.PATH = `${fakeBin}:${originalPath || ""}`;
     console.log = (value = "") => output.push(String(value));
     const report = await runCli(["--cwd", cwd, "setup", "--skip-install", "--skip-tools", "--skip-docker", "--json"]);
     assert.equal(report.mode, "generated-app");
-    assert.equal(report.script, "scripts/nstack-local.mjs");
+    assert.equal(report.installedDependencies, false);
   } finally {
     console.log = originalLog;
+    if (originalPath === undefined) delete process.env.PATH;
+    else process.env.PATH = originalPath;
   }
 
-  assert.equal(readFileSync(path.join(cwd, "setup-ran.txt"), "utf8"), [
-    "setup",
-    "--skip-install",
-    "--skip-tools",
-    "--skip-docker",
+  const json = JSON.parse(output.at(-1));
+  assert.equal(json.mode, "generated-app");
+  assert.equal(json.installedDependencies, false);
+});
+
+test("cli check honors --skip-docker for apps with cache resources", async () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "nstack-check-skip-docker-"));
+  const fakeBin = path.join(cwd, "bin");
+  mkdirSync(path.join(cwd, "backend", "api"), { recursive: true });
+  mkdirSync(path.join(cwd, "frontend", "app", "generated"), { recursive: true });
+  mkdirSync(fakeBin, { recursive: true });
+  writeFileSync(path.join(cwd, "nstack.config.mjs"), "export default { app: { name: 'App', slug: 'app' } };\n");
+  writeFileSync(path.join(cwd, "package.json"), "{\"name\":\"check-app\",\"private\":true}\n");
+  writeFileSync(path.join(cwd, "backend", "encore.app"), "{\"id\":\"\"}\n");
+  writeFileSync(path.join(cwd, "backend", "api", "cache.ts"), [
+    'import { CacheCluster } from "encore.dev/storage/cache";',
+    'export const cache = new CacheCluster("sessions");',
   ].join("\n"));
-  assert.deepEqual(JSON.parse(output.join("\n")), {
-    mode: "generated-app",
-    script: "scripts/nstack-local.mjs",
-  });
+  writeFileSync(path.join(fakeBin, "pnpm"), [
+    "#!/usr/bin/env sh",
+    "if [ \"$1\" = \"--version\" ]; then printf '10.18.3\\n'; exit 0; fi",
+    "exit 0",
+    "",
+  ].join("\n"));
+  chmodSync(path.join(fakeBin, "pnpm"), 0o755);
+  writeFakeEncoreForCheck(path.join(fakeBin, "encore"));
+  writeFileSync(path.join(fakeBin, "docker"), [
+    "#!/usr/bin/env sh",
+    `printf docker-called > ${JSON.stringify(path.join(cwd, "docker-called"))}`,
+    "exit 99",
+    "",
+  ].join("\n"));
+  chmodSync(path.join(fakeBin, "docker"), 0o755);
+
+  const output = [];
+  const originalLog = console.log;
+  const originalPath = process.env.PATH;
+  try {
+    process.env.PATH = `${fakeBin}:${originalPath || ""}`;
+    console.log = (value = "") => output.push(String(value));
+    const report = await runCli([
+      "--cwd", cwd,
+      "check",
+      "--skip-install",
+      "--skip-tools",
+      "--skip-docker",
+      "--json",
+    ]);
+    assert.equal(report.mode, "cli");
+  } finally {
+    console.log = originalLog;
+    if (originalPath === undefined) delete process.env.PATH;
+    else process.env.PATH = originalPath;
+  }
+
+  assert.equal(existsSync(path.join(cwd, "docker-called")), false);
+  assert.equal(JSON.parse(output.at(-1)).mode, "cli");
 });
 
 test("cli blocks nstack dev under AI harnesses unless explicitly allowed", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "nstack-dev-ai-block-"));
-  mkdirSync(path.join(cwd, "scripts"), { recursive: true });
-  writeFileSync(path.join(cwd, "scripts", "dev.mjs"), `
-import { writeFileSync } from "node:fs";
-writeFileSync("dev-ran.txt", "bad");
-`);
+  writeFileSync(path.join(cwd, "nstack.config.mjs"), "export default { app: { name: 'App', slug: 'app' } };\n");
+  writeFileSync(path.join(cwd, "package.json"), "{\"private\":true}\n");
+  mkdirSync(path.join(cwd, "backend"), { recursive: true });
+  mkdirSync(path.join(cwd, "frontend"), { recursive: true });
+  writeFileSync(path.join(cwd, "backend", "encore.app"), "{\"id\":\"\"}\n");
+  writeFileSync(path.join(cwd, "frontend", "package.json"), "{\"private\":true}\n");
 
   const envKeys = ["NSTACK_AGENT_HARNESS", "AI_ALLOW_DEVSERVER"];
   const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
@@ -255,46 +281,60 @@ writeFileSync("dev-ran.txt", "bad");
   assert.equal(existsSync(path.join(cwd, "dev-ran.txt")), false);
 });
 
-test("cli runs the generated app devexec runner", async () => {
-  const cwd = mkdtempSync(path.join(tmpdir(), "nstack-devexec-cli-"));
-  mkdirSync(path.join(cwd, "scripts"), { recursive: true });
-  writeFileSync(path.join(cwd, "scripts", "devexec.mjs"), `
-import { writeFileSync } from "node:fs";
-writeFileSync("devexec-ran.txt", process.argv.slice(2).join("\\n"));
-`);
+function writeFakeEncoreForCheck(file) {
+  writeFileSync(file, [
+    "#!/usr/bin/env node",
+    'const { mkdirSync, writeFileSync } = require("node:fs");',
+    'const path = require("node:path");',
+    "const args = process.argv.slice(2);",
+    'if (args[0] === "version") { console.log("encore version v0.0.0-test"); process.exit(0); }',
+    'if (args[0] === "check") process.exit(0);',
+    'if (args[0] === "gen" && args[1] === "client") {',
+    '  const output = args[args.indexOf("--output") + 1];',
+    "  mkdirSync(path.dirname(output), { recursive: true });",
+    "  writeFileSync(output, [",
+    '    "export type BaseURL = string\\n",',
+    '    "/**\\n",',
+    '    " * Environment returns a BaseURL for calling the Encore API in the given environment.\\n",',
+    '    " */\\n",',
+    '    "export function Environment(name: string): BaseURL {\\n",',
+    '    "    return \\"https://\\" + name + \\".encr.app\\"\\n",',
+    '    "}\\n",',
+    '    "/**\\n",',
+    '    " * PreviewEnv returns a BaseURL for calling the Encore API in the given preview environment.\\n",',
+    '    " */\\n",',
+    '    "export function PreviewEnv(pr: number | string): BaseURL {\\n",',
+    '    "    return Environment(`pr${pr}`)\\n",',
+    '    "}\\n",',
+    '  ].join(""));',
+    "  process.exit(0);",
+    "}",
+    'console.error("unexpected fake encore args: " + args.join(" "));',
+    "process.exit(1);",
+    "",
+  ].join("\n"));
+  chmodSync(file, 0o755);
+}
 
-  const output = [];
-  const originalLog = console.log;
-  try {
-    console.log = (value = "") => output.push(String(value));
-    const report = await runCli([
+test("cli validates devexec input before starting the stack", async () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "nstack-devexec-cli-"));
+  writeFileSync(path.join(cwd, "nstack.config.mjs"), "export default { app: { name: 'App', slug: 'app' } };\n");
+  writeFileSync(path.join(cwd, "package.json"), "{\"private\":true}\n");
+  mkdirSync(path.join(cwd, "backend"), { recursive: true });
+  mkdirSync(path.join(cwd, "frontend"), { recursive: true });
+  writeFileSync(path.join(cwd, "backend", "encore.app"), "{\"id\":\"\"}\n");
+  writeFileSync(path.join(cwd, "frontend", "package.json"), "{\"private\":true}\n");
+
+  await assert.rejects(
+    () => runCli([
       "--cwd", cwd,
       "devexec",
-      "--code", "await apiJson('/status')",
       "--frontend-url", "http://127.0.0.1:3100",
       "--backend-url", "http://127.0.0.1:4100",
       "--timeout-ms", "1234",
-      "--json",
-    ]);
-    assert.equal(report.script, "scripts/devexec.mjs");
-    assert.equal(typeof report.harness.detected, "boolean");
-  } finally {
-    console.log = originalLog;
-  }
-
-  assert.equal(readFileSync(path.join(cwd, "devexec-ran.txt"), "utf8"), [
-    "--code",
-    "await apiJson('/status')",
-    "--frontend-url",
-    "http://127.0.0.1:3100",
-    "--backend-url",
-    "http://127.0.0.1:4100",
-    "--timeout-ms",
-    "1234",
-  ].join("\n"));
-  const json = JSON.parse(output.join("\n"));
-  assert.equal(json.script, "scripts/devexec.mjs");
-  assert.equal(typeof json.harness.detected, "boolean");
+    ]),
+    /Missing JavaScript/,
+  );
 });
 
 test("cli accepts --help and -h after commands", async () => {
@@ -331,6 +371,57 @@ test("cli reports version in text and json modes", async () => {
   assert.equal(output[0], `nstack ${packageJson.version}`);
   assert.deepEqual(JSON.parse(output[1]), { name: "nstack", version: packageJson.version });
   assert.equal(output[2], `nstack ${packageJson.version}`);
+});
+
+test("update check reports newer release metadata", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalLog = console.log;
+  const output = [];
+  try {
+    globalThis.fetch = async (url) => {
+      assert.equal(url, "https://nstack.example.test/api/releases/latest");
+      return new Response(JSON.stringify({
+        version: "99.0.0",
+        branch: "main",
+        commit: "abcdef123456",
+        repository: "https://git.example.test/nstack",
+        url: "https://git.example.test/nstack",
+        fetchedAt: "2026-06-23T00:00:00.000Z",
+        changelog: [
+          { commit: "abcdef123456", message: "ship update command", date: "2026-06-23T00:00:00.000Z" },
+        ],
+      }), {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      });
+    };
+    console.log = (value = "") => output.push(String(value));
+
+    await runCli([
+      "update",
+      "--check",
+      "--json",
+      "--metadata-url",
+      "https://nstack.example.test/api/releases/latest",
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    console.log = originalLog;
+  }
+
+  const report = JSON.parse(output[0]);
+  assert.equal(report.checked, true);
+  assert.equal(report.updated, false);
+  assert.equal(report.updateAvailable, true);
+  assert.equal(report.currentVersion, packageJson.version);
+  assert.equal(report.latestVersion, "99.0.0");
+  assert.equal(report.release.changelog[0].message, "ship update command");
+});
+
+test("version comparison handles common semver shapes", () => {
+  assert.equal(compareVersions("0.1.94", "0.1.93"), 1);
+  assert.equal(compareVersions("v1.2.0", "1.2"), 0);
+  assert.equal(compareVersions("1.2.0", "1.2.1"), -1);
 });
 
 test("--ci fails instead of prompting for missing deploy settings", async () => {

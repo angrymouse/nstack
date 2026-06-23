@@ -1557,12 +1557,14 @@ test("deploy auto-commits generated source-backed artifacts before triggering Do
   const root = mkdtempSync(path.join(tmpdir(), "nstack-source-sync-"));
   const cwd = path.join(root, "app");
   const remote = path.join(root, "remote.git");
+  const fakeBin = path.join(root, "bin");
   mkdirSync(path.join(cwd, "backend", "api"), { recursive: true });
   mkdirSync(path.join(cwd, "frontend", "app", "generated"), { recursive: true });
   mkdirSync(path.join(cwd, "frontend"), { recursive: true });
-  mkdirSync(path.join(cwd, "scripts"), { recursive: true });
   mkdirSync(path.join(cwd, ".nstack"), { recursive: true });
+  mkdirSync(fakeBin, { recursive: true });
   writeFileSync(path.join(cwd, ".gitignore"), ".nstack\nnode_modules\n");
+  writeFileSync(path.join(cwd, "package.json"), "{\"name\":\"source-sync\",\"private\":true}\n");
   writeFileSync(path.join(cwd, "nstack.config.mjs"), `export default {
   app: { name: "Source Sync", slug: "source-sync" },
   deploy: {
@@ -1575,17 +1577,50 @@ test("deploy auto-commits generated source-backed artifacts before triggering Do
   },
   verify: { endpoints: [] },
 };\n`);
+  writeFileSync(path.join(cwd, "backend", "encore.app"), "{\"id\":\"\"}\n");
   writeFileSync(path.join(cwd, "backend", "api", "status.ts"), `export const ok = true;\n`);
   writeFileSync(path.join(cwd, "backend", "Dockerfile"), "FROM scratch\n");
   writeFileSync(path.join(cwd, "frontend", "Dockerfile"), "FROM scratch\n");
   writeFileSync(path.join(cwd, "frontend", "app", "generated", "encore-client.ts"), "old client\n");
-  writeFileSync(path.join(cwd, "scripts", "nstack-client.mjs"), `import { mkdirSync, writeFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-mkdirSync(path.join(root, "frontend", "app", "generated"), { recursive: true });
-writeFileSync(path.join(root, "frontend", "app", "generated", "encore-client.ts"), "generated client\\n");
+  writeFileSync(path.join(fakeBin, "encore"), `#!/usr/bin/env node
+const { mkdirSync, writeFileSync } = require("node:fs");
+const path = require("node:path");
+const args = process.argv.slice(2);
+if (args[0] === "version") {
+  console.log("encore version v0.0.0-test");
+  process.exit(0);
+}
+if (args[0] === "debug" && args[1] === "meta") {
+  console.log(JSON.stringify({ svcs: [], cron_jobs: [] }));
+  process.exit(0);
+}
+if (args[0] === "check") process.exit(0);
+if (args[0] === "gen" && args[1] === "client") {
+  const output = args[args.indexOf("--output") + 1];
+  mkdirSync(path.dirname(output), { recursive: true });
+  writeFileSync(output, [
+    "export type BaseURL = string\\n",
+    "export const Local: BaseURL = \\"http://localhost:4000\\"\\n",
+    "/**\\n",
+    " * Environment returns a BaseURL for calling the Encore application's API in the given environment.\\n",
+    " */\\n",
+    "export function Environment(name: string): BaseURL {\\n",
+    "    return \\"https://\\" + name + \\".encr.app\\"\\n",
+    "}\\n",
+    "\\n",
+    "/**\\n",
+    " * PreviewEnv returns a BaseURL for calling the Encore application's API in the given preview environment.\\n",
+    " */\\n",
+    "export function PreviewEnv(pr: number | string): BaseURL {\\n",
+    "    return Environment(\\\`pr\\\${pr}\\\`)\\n",
+    "}\\n",
+    "export default class Client {}\\n",
+  ].join(""));
+  process.exit(0);
+}
+process.exit(1);
 `);
+  chmodSync(path.join(fakeBin, "encore"), 0o755);
   execFileSync("git", ["init", "--bare", remote], { stdio: "ignore" });
   execFileSync("git", ["init"], { cwd, stdio: "ignore" });
   execFileSync("git", ["config", "user.email", "nstack@example.test"], { cwd });
@@ -1603,13 +1638,14 @@ writeFileSync(path.join(root, "frontend", "app", "generated", "encore-client.ts"
     "?? backend/.gitignore",
   ]);
 
-  const envKeys = ["NSTACK_DOMAIN", "DOKPLOY_URL", "DOKPLOY_API_KEY", "NSTACK_COMMIT_UNSTAGED_CHANGES", "NSTACK_COMMIT_MESSAGE"];
+  const envKeys = ["NSTACK_DOMAIN", "DOKPLOY_URL", "DOKPLOY_API_KEY", "NSTACK_COMMIT_UNSTAGED_CHANGES", "NSTACK_COMMIT_MESSAGE", "PATH"];
   const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
   process.env.NSTACK_DOMAIN = "source-sync.example.test";
   process.env.DOKPLOY_URL = "https://dokploy.example.test";
   process.env.DOKPLOY_API_KEY = "dummy";
   process.env.NSTACK_COMMIT_UNSTAGED_CHANGES = "true";
   process.env.NSTACK_COMMIT_MESSAGE = "Update app status";
+  process.env.PATH = `${fakeBin}${path.delimiter}${process.env.PATH || ""}`;
 
   const calls = [];
   const originalFetch = globalThis.fetch;

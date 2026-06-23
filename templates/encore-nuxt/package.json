@@ -3,12 +3,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "setup": "node scripts/nstack-local.mjs setup",
-    "dev": "node scripts/dev.mjs",
-    "devexec": "node scripts/devexec.mjs",
-    "worktree": "AI_ALLOW_DEVSERVER=1 PASEO_PORT=${PASEO_PORT:-3000} pnpm dev",
-    "build": "node scripts/nstack-client.mjs gen && pnpm --dir frontend build",
-    "check": "node scripts/check.mjs",
+    "setup": "nstack setup",
+    "dev": "nstack dev",
+    "devexec": "nstack devexec",
+    "worktree": "AI_ALLOW_DEVSERVER=1 PASEO_PORT=${PASEO_PORT:-3000} nstack dev",
+    "build": "nstack client gen && pnpm --dir frontend build",
+    "check": "nstack check",
     "deploy": "nstack deploy",
     "status": "nstack status"
   },

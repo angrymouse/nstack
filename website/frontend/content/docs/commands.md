@@ -29,6 +29,7 @@ nstack logs --follow
 ```bash
 nstack target create staging --domain staging.example.com
 nstack env set API_SECRET
+nstack update
 nstack backup
 nstack pull
 nstack rollback

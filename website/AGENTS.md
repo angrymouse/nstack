@@ -51,11 +51,10 @@ Before changing code, read [NSTACK_GUIDELINES.md](./NSTACK_GUIDELINES.md).
   Encore Cloud. nstack uses `nstack.config.mjs` `app.slug` as the Dokploy/nstack
   identity; an empty Encore id keeps local `encore run` and `encore check` from
   fetching Encore Cloud secrets.
-- Keep `scripts/nstack-local.mjs` in the local setup/dev/check path so fresh
-  clones install dependencies, bootstrap pnpm through Corepack, install the
-  Encore CLI when it is missing, and stop with clear Docker instructions only
-  when Docker is needed but unavailable. Under AI coding harnesses, use
-  `pnpm devexec '<js>'` from the app directory for one-shot dev-server checks.
+- Local setup/dev/check flows live in the nstack CLI. Fresh clones use
+  `nstack setup`, `nstack dev`, and `nstack check` through package-script
+  aliases. Under AI coding harnesses, use `pnpm devexec '<js>'` from the app
+  directory for one-shot dev-server checks.
   From a monorepo root, use `pnpm --dir <app-dir> devexec '<js>'` or
   `nstack devexec --cwd <app-dir> '<js>'`. Use
   `screenshot("/", { width: 390, height: 844 })` inside devexec for page

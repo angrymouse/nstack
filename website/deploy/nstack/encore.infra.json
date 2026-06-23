@@ -30,5 +30,22 @@
       "X-Request-Id"
     ]
   },
-  "secrets": {}
+  "secrets": {},
+  "redis": {
+    "release-metadata": {
+      "host": "nstack-redis:6379",
+      "database_index": 0,
+      "key_prefix": "nstack:release-metadata:",
+      "in_memory": false,
+      "tls_config": {
+        "disabled": true
+      },
+      "auth": {
+        "type": "auth_string",
+        "auth_string": {
+          "$env": "NSTACK_REDIS_PASSWORD"
+        }
+      }
+    }
+  }
 }

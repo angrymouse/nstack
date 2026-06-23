@@ -68,6 +68,7 @@ services:
       IMAGE_TAG: "${NSTACK_IMAGE_TAG:-local}"
       NSTACK_TARGET: "prod"
       NSTACK_DOMAIN: "nstack.tech"
+      NSTACK_REDIS_PASSWORD: "${NSTACK_REDIS_PASSWORD:?set NSTACK_REDIS_PASSWORD}"
     expose:
       - "8080"
     networks:

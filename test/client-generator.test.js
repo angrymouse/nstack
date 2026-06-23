@@ -1,65 +1,61 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
-
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+import { runClientGenerator } from "../src/client.js";
 
 test("client generation does not touch the Nuxt HMR input when output is unchanged", async () => {
   const app = mkdtempSync(path.join(tmpdir(), "nstack-client-hmr-"));
   const fakeBin = path.join(app, "bin");
   const backendApi = path.join(app, "backend", "api");
-  mkdirSync(path.join(app, "scripts"), { recursive: true });
   mkdirSync(path.join(app, "frontend", "app", "generated"), { recursive: true });
   mkdirSync(backendApi, { recursive: true });
   mkdirSync(fakeBin, { recursive: true });
 
-  copyFileSync(
-    path.join(repoRoot, "templates", "encore-nuxt", "scripts", "nstack-client.mjs"),
-    path.join(app, "scripts", "nstack-client.mjs"),
-  );
+  writeFileSync(path.join(app, "package.json"), "{\"name\":\"hmr-test\"}\n");
   writeFileSync(path.join(app, "backend", "encore.app"), `{"id":"hmr-test"}\n`);
   writeFileSync(path.join(backendApi, "status.ts"), "one\n");
   writeFakeEncore(path.join(fakeBin, "encore"));
 
-  const env = { ...process.env, PATH: `${fakeBin}:${process.env.PATH || ""}` };
+  const originalPath = process.env.PATH;
   const clientFile = path.join(app, "frontend", "app", "generated", "encore-client.ts");
   const appTempRoot = path.join(app, ".nstack", "tmp");
   const osTempBefore = osClientTempDirs();
-  const runGen = () => execFileSync(process.execPath, ["scripts/nstack-client.mjs", "gen", "--force"], {
-    cwd: app,
-    env,
-    stdio: "pipe",
-  });
+  const relativeApp = path.relative(process.cwd(), app);
+  const runGen = () => runClientGenerator(relativeApp, "gen", { force: true, capture: true });
   const mtime = () => statSync(clientFile, { bigint: true }).mtimeNs;
 
-  runGen();
-  const first = mtime();
-  assert.match(readFileSync(clientFile, "utf8"), /value = "one"/);
+  try {
+    process.env.PATH = `${fakeBin}:${originalPath || ""}`;
+    runGen();
+    const first = mtime();
+    assert.match(readFileSync(clientFile, "utf8"), /value = "one"/);
 
-  await delay(25);
-  runGen();
-  const second = mtime();
-  assert.equal(second, first);
+    await delay(25);
+    runGen();
+    const second = mtime();
+    assert.equal(second, first);
 
-  await delay(25);
-  writeFileSync(path.join(backendApi, "status.ts"), "two\n");
-  runGen();
-  const third = mtime();
-  assert.ok(third > second);
-  assert.match(readFileSync(clientFile, "utf8"), /value = "two"/);
-  assert.deepEqual(readDirNames(appTempRoot), []);
-  assert.deepEqual(osClientTempDirs(), osTempBefore);
+    await delay(25);
+    writeFileSync(path.join(backendApi, "status.ts"), "two\n");
+    runGen();
+    const third = mtime();
+    assert.ok(third > second);
+    assert.match(readFileSync(clientFile, "utf8"), /value = "two"/);
+    assert.deepEqual(readDirNames(appTempRoot), []);
+    assert.deepEqual(osClientTempDirs(), osTempBefore);
 
-  const stale = path.join(appTempRoot, "client-stale");
-  mkdirSync(stale, { recursive: true });
-  const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
-  utimesSync(stale, old, old);
-  runGen();
-  assert.equal(existsSync(stale), false);
+    const stale = path.join(appTempRoot, "client-stale");
+    mkdirSync(stale, { recursive: true });
+    const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    utimesSync(stale, old, old);
+    runGen();
+    assert.equal(existsSync(stale), false);
+  } finally {
+    if (originalPath === undefined) delete process.env.PATH;
+    else process.env.PATH = originalPath;
+  }
 });
 
 function writeFakeEncore(file) {

@@ -45,13 +45,15 @@ path that gives Dokploy native push webhooks.
 nstack setup    # install local tooling and dependencies
 pnpm dev        # or: nstack dev
 nstack devexec 'await apiJson("/status")'
-pnpm check
+pnpm check      # or: nstack check
 nstack deploy
 nstack status
 ```
 
 Use `nstack env set NAME` for runtime secrets and `nstack logs --follow` when a
-deploy is running.
+deploy is running. `nstack update` refreshes a git-installed nstack checkout.
+The CLI prints an update notice after normal commands when nstack.tech reports a
+newer version.
 
 ## When Needed
 
@@ -59,6 +61,7 @@ deploy is running.
 nstack doctor
 nstack target create staging --domain staging.example.com
 nstack pull
+nstack update
 nstack backup
 nstack rollback
 nstack undeploy --yes
@@ -66,18 +69,17 @@ nstack cleanup
 nstack open dashboard
 ```
 
-The generated app keeps the package scripts small. `nstack setup` installs
-project dependencies, bootstraps pnpm through Corepack when needed, installs the
-Encore CLI with the official installer when it is missing, and checks Docker
-only when declared Encore resources need it. `pnpm dev` runs the same local
-orchestrator as `nstack dev`: Encore backend, Nuxt frontend, and generated
-client sync for HMR. On a fresh clone, `pnpm dev`/`nstack dev` and `pnpm check`
-reuse the same local setup path before running. They stop with direct
-instructions when Docker is not running or cannot be accessed. `pnpm check`,
-`pnpm build`, and `nstack deploy` sync the Encore TypeScript client used by the
-Nuxt frontend. `nstack client gen` is available when you explicitly want to
-regenerate it. Client generation and deploy metadata use local Encore commands
-for Dokploy/nstack targets; Encore Cloud login is not required.
+The generated app keeps package scripts as aliases to the CLI. `nstack setup`
+installs project dependencies, bootstraps pnpm through Corepack when needed,
+installs the Encore CLI with the official installer when it is missing, and
+checks Docker only when declared Encore resources need it. `pnpm dev` calls
+`nstack dev` to run the Encore backend, Nuxt frontend, and generated client sync
+for HMR. On a fresh clone, `pnpm dev` and `pnpm check` reuse the CLI setup path
+before running. They stop with direct instructions when Docker is not running or
+cannot be accessed. `pnpm check`, `pnpm build`, and `nstack deploy` sync the
+Encore TypeScript client used by the Nuxt frontend. `nstack client gen` is
+available when you explicitly want to regenerate it. Client generation and
+deploy metadata use local Encore commands for Dokploy/nstack targets.
 
 Generated templates intentionally keep `backend/encore.app` with an empty
 Encore app id. That is Encore's local-only mode and prevents local

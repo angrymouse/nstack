@@ -159,12 +159,30 @@ export interface ClientOptions {
 }
 
 export namespace api {
+    export interface LatestReleaseResponse {
+        source: string
+        version: string
+        branch: string
+        commit: string
+        repository: string
+        url: string
+        fetchedAt: string
+        changelog: ReleaseChange[]
+    }
+
     export interface ReadyResponse {
         app: string
         commit: string
         "image_tag": string
         "uptime_seconds": number
         ok: boolean
+    }
+
+    export interface ReleaseChange {
+        commit: string
+        message: string
+        date: string
+        url: string
     }
 
     export interface StatusResponse {
@@ -180,8 +198,15 @@ export namespace api {
 
         constructor(baseClient: BaseClient) {
             this.baseClient = baseClient
+            this.latest = this.latest.bind(this)
             this.ready = this.ready.bind(this)
             this.status = this.status.bind(this)
+        }
+
+        public async latest(): Promise<LatestReleaseResponse> {
+            // Now make the actual call to the API
+            const resp = await this.baseClient.callTypedAPI("GET", `/releases/latest`)
+            return await resp.json() as LatestReleaseResponse
         }
 
         public async ready(): Promise<ReadyResponse> {

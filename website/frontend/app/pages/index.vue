@@ -372,9 +372,9 @@ export function apiClient(options: ClientOptions = {}): Client {
   "name": "my-app",
   "private": true,
   "scripts": {
-    "setup": "node scripts/nstack-local.mjs setup",
-    "dev": "node scripts/dev.mjs",
-    "build": "node scripts/nstack-client.mjs gen && pnpm --dir frontend build",
+    "setup": "nstack setup",
+    "dev": "nstack dev",
+    "build": "nstack client gen && pnpm --dir frontend build",
     "deploy": "nstack deploy",
     "status": "nstack status"
   },
