@@ -63,11 +63,13 @@ typefaces such as Excon, Satoshi, Newsreader, Hanken Grotesk, Bricolage
 Grotesque, Absans, or another suitable family. Tune weights, line height,
 spacing, and mobile rendering before treating the screen as done.
 
-Small labels above titles should carry real state, category, or navigation
-context. When they repeat the page idea, remove them. Do not turn those labels
-into bordered cards, shadowed pills, or centered captions above the heading.
-Put essential context in the heading, body copy, tabs, or local metadata. Use
-cards for controls, repeated records, and content that needs visual separation.
+Small labels above titles should change how the user reads or acts on the
+section. They can be useful for a selected view, required scope, meaningful
+category, or short-lived state. When they repeat the page idea or merely
+announce the section, remove them. Do not turn those labels into bordered cards,
+shadowed pills, or centered captions above the heading. Put essential context in
+the heading, body copy, tabs, or local metadata. Use cards for controls,
+repeated records, and content that needs visual separation.
 
 ## Frontend API Client
 

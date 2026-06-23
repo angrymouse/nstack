@@ -73,11 +73,13 @@ Before changing code, read [NSTACK_GUIDELINES.md](./NSTACK_GUIDELINES.md).
 - In prose and frontend copy, avoid technical detail unless it helps the reader
   decide, act, or understand current state. Remove implementation facts that
   only make copy sound more technical.
-- Avoid decorative badges, status pills, pulsing dots, and tiny uppercase
-  subtitles when they do not carry real product or workflow meaning. Tiny
-  labels above headings are a common antipattern, especially when they repeat
-  the page idea or sit inside a bordered card, shadowed pill, or standalone
-  surface for decoration.
+- Avoid decorative eyebrow labels, badges, status pills, pulsing dots, and tiny
+  uppercase subtitles when they do not carry real product or workflow meaning.
+  Tiny labels above headings are a common antipattern, especially when they
+  repeat the page idea, announce the section, or sit inside a bordered card,
+  shadowed pill, or standalone surface for decoration. Use a small label only
+  when it changes how the user reads or acts on the section, such as a selected
+  view, required scope, meaningful category, or short-lived state.
 - Treat ornamental framing as design debt. A small label above a hero title,
   centered badge, lone pill, or card whose job is only to announce the section
   is usually a layout crutch. Put essential context in the heading, body copy,
