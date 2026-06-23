@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { POSTGRES_INIT_IMAGE, POSTGRES_INIT_SERVICE, renderDokployCompose } from "../src/render/compose.js";
+import { POSTGRES_INIT_IMAGE, POSTGRES_INIT_SERVICE, REDIS_IMAGE, renderDokployCompose } from "../src/render/compose.js";
 
 test("compose renderer quotes dynamic values and omits cron runner containers", () => {
   const output = renderDokployCompose({
@@ -126,6 +126,58 @@ test("compose renderer provisions RustFS for Encore object storage buckets", () 
   assert.match(output, /mc anonymous set download local\/bucket-app-public-assets/);
   assert.doesNotMatch(output, /backend:[\s\S]*depends_on:[\s\S]*rustfs-init:[\s\S]*condition: "service_completed_successfully"/);
   assert.match(output, /rustfs_data: \{\}/);
+});
+
+test("compose renderer adds source push fallbacks for newly declared resources", () => {
+  const output = renderDokployCompose({
+    config: {
+      app: { slug: "push-app", domain: "push.example.test" },
+      deploy: { target: "prod" },
+      paths: { backend: "backend" },
+    },
+    resources: {
+      databases: [{ name: "app", migrations: "api/migrations" }],
+      caches: [{ name: "sessions" }],
+      topics: [],
+      buckets: [{ name: "uploads" }],
+      secrets: [],
+      crons: [],
+    },
+    infra: {
+      postgres: {
+        host: "push-app-postgres:5432",
+        database: "app",
+        user: "nstack",
+      },
+      redis: {
+        host: "push-app-redis:6379",
+      },
+      objectStorage: {
+        endpoint: "http://push-app-rustfs:9000",
+        region: "auto",
+      },
+    },
+    images: {
+      backend: "push-app-backend:${NSTACK_IMAGE_TAG:-local}",
+      frontend: "push-app-frontend:${NSTACK_IMAGE_TAG:-local}",
+    },
+    release: { commit: "abc123", tag: "tag" },
+    pushProvision: { postgres: true, redis: true, objectStorage: true },
+  });
+
+  assert.match(output, new RegExp(`push-app-postgres:\\n\\s+image: "${POSTGRES_INIT_IMAGE.replaceAll(".", "\\.")}"`));
+  assert.match(output, /POSTGRES_PASSWORD: "\$\{NSTACK_POSTGRES_PASSWORD:-nstack-push-app-postgres\}"/);
+  assert.match(output, /postgres_data: \{\}/);
+  assert.match(output, new RegExp(`push-app-redis:\\n\\s+image: "${REDIS_IMAGE.replaceAll(".", "\\.")}"`));
+  assert.match(output, /REDIS_PASSWORD: "\$\{NSTACK_REDIS_PASSWORD:-nstack-push-app-redis\}"/);
+  assert.match(output, /redis_data: \{\}/);
+  assert.match(output, /NSTACK_REDIS_PASSWORD: "\$\{NSTACK_REDIS_PASSWORD:-nstack-push-app-redis\}"/);
+  assert.match(output, /RUSTFS_ACCESS_KEY: "\$\{NSTACK_MINIO_ACCESS_KEY:-nstack-push-app-object-access\}"/);
+  assert.match(output, /RUSTFS_SECRET_KEY: "\$\{NSTACK_MINIO_SECRET_KEY:-nstack-push-app-object-secret\}"/);
+  assert.match(output, /postgres-init:[\s\S]*depends_on:[\s\S]*push-app-postgres:[\s\S]*condition: "service_healthy"/);
+  assert.match(output, /migrate-app:[\s\S]*depends_on:[\s\S]*postgres-init:[\s\S]*condition: "service_completed_successfully"/);
+  assert.match(output, /backend:[\s\S]*depends_on:[\s\S]*migrate-app:[\s\S]*condition: "service_completed_successfully"[\s\S]*push-app-redis:[\s\S]*condition: "service_started"/);
+  assert.doesNotMatch(output, /dokploy-network/);
 });
 
 test("compose renderer runs Encore database migrations with the pinned go-migrate image", () => {

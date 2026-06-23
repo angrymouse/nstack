@@ -209,6 +209,8 @@ https://github.com/acme/my-app.git
 
 For private repositories and automatic push deploys, prefer the native Dokploy provider integration for your Git host. Plain Git source mode can also clone custom repositories when configured with a Dokploy SSH key id, but native provider-backed sources are the route that gives Dokploy its normal push webhook behavior.
 
+Provider-backed push deploys can start newly declared Postgres, cache, and object storage resources from generated Compose fallbacks when local Dokploy state has not provisioned them yet. Run `nstack deploy` to reconcile those resources with native Dokploy resources.
+
 ### 7. Scaffold The App
 
 Create the app:
@@ -373,7 +375,7 @@ Render once to inspect the deploy plan without deploying:
 nstack render
 ```
 
-The render command writes generated artifacts under `deploy/nstack/`. Commit those files for Dokploy source builds, because Dokploy reads the Compose file from the repository on push deployments.
+The render command writes generated artifacts under `deploy/nstack/`. Commit those files for Dokploy source builds, because Dokploy reads the Compose file from the repository on push deployments. Provider-backed push deploys can add newly declared stateful resources from the generated Compose file, while destructive cleanup stays in `nstack deploy`.
 
 ### 13. Deploy To Production
 
@@ -606,6 +608,9 @@ On deploy, nstack can create or update:
 - Dokploy native Postgres when Encore declares SQL databases.
 - Dokploy native Redis-compatible Dragonfly cache resources when Encore declares
   cache resources.
+- Source-backed Git pushes can start missing Postgres, cache, and object storage
+  services from generated Compose fallbacks. Destructive cleanup stays in
+  `nstack deploy`.
 - Compose services for backend, frontend, NSQ Pub/Sub, and RustFS object storage.
 - Domains/Traefik routes for frontend, API traffic, and public object buckets.
 - Compose environment variables for generated infrastructure credentials and Encore `secret()` values.

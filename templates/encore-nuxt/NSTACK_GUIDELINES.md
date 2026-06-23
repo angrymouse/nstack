@@ -43,6 +43,9 @@ matching Dokploy resource. If cleanup is declined, the ignore is recorded in
 `nstack.config.mjs`.
 
 For source-backed/git deploys, destructive resource cleanup is skipped.
+Provider-backed source pushes can start newly declared Postgres, cache, and
+object storage resources from generated Compose fallbacks. Run `nstack deploy`
+to reconcile them with Dokploy-native resources.
 
 ## Frontend Design
 

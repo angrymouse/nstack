@@ -1546,6 +1546,12 @@ test("deploy configures Gitea source-backed Compose apps for push deployments", 
   }));
   const finalCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8" }).trim();
   const remoteCommit = execFileSync("git", ["rev-parse", "refs/heads/feature/push-deploy"], { cwd: remote, encoding: "utf8" }).trim();
+  const composeText = readFileSync(path.join(cwd, "deploy", "nstack", "compose.dokploy.yaml"), "utf8");
+  const infraConfigMatch = composeText.match(/ENCORE_INFRA_CONFIG_B64: "([^"]+)"/);
+  assert.ok(infraConfigMatch);
+  assert.notEqual(infraConfigMatch[1], "${ENCORE_INFRA_CONFIG_B64:?set ENCORE_INFRA_CONFIG_B64}");
+  const committedInfra = JSON.parse(Buffer.from(infraConfigMatch[1], "base64").toString("utf8"));
+  assert.equal(committedInfra.metadata.app_id, "source-push");
   assert.equal(env.NSTACK_BUILD_CONTEXT, "../..");
   assert.notEqual(finalCommit, currentCommit);
   assert.equal(remoteCommit, finalCommit);

@@ -132,11 +132,12 @@ export async function deploy(options = {}) {
   const composeFile = path.join(cwd, generatedDir, "compose.dokploy.yaml");
   const releaseFile = releaseManifestPath(cwd);
   ensureDir(path.dirname(infraFile));
+  let pushProvision = sourcePushProvisioning({ config, resources, state });
   let infraText = renderEncoreInfra({ config, state, resources, infra, release, secretEnv });
   let runtimeInfraText = renderEncoreInfra({ config, state, resources, infra, release, secretEnv, materializeSecrets: true });
   let artifacts = deploymentArtifacts({ config, release, infraText, localContext: localOnly });
   let images = artifacts.images;
-  let ctx = { config, state, resources, infra, images, build: artifacts.build, release, secretEnv };
+  let ctx = { config, state, resources, infra, images, build: artifacts.build, release, secretEnv, pushProvision };
   const composeBuildEnv = composeEnvironmentValues({
     resources,
     infra,
@@ -269,7 +270,8 @@ export async function deploy(options = {}) {
   runtimeInfraText = renderEncoreInfra({ config, state: nextState, resources, infra, release, secretEnv, materializeSecrets: true });
   artifacts = deploymentArtifacts({ config, release, infraText, localContext: localOnly });
   images = artifacts.images;
-  ctx = { config, state: nextState, resources, infra, images, build: artifacts.build, release, secretEnv };
+  pushProvision = sourcePushProvisioning({ config, resources, state: nextState });
+  ctx = { config, state: nextState, resources, infra, images, build: artifacts.build, release, secretEnv, pushProvision };
   writeText(infraFile, infraText);
   writeText(composeFile, renderDokployCompose(ctx));
 
@@ -1643,6 +1645,17 @@ function isSourceBackedCompose(config) {
   return config.deploy.buildMode === "compose" && Boolean(sourceType) && sourceType !== "raw";
 }
 
+function sourcePushProvisioning({ config, resources, state }) {
+  if (!isSourceBackedCompose(config)) {
+    return { postgres: false, redis: false, objectStorage: false };
+  }
+  return {
+    postgres: resources.databases.length > 0 && !state.dokploy?.postgresId && !state.infra?.postgres?.password,
+    redis: resources.caches.length > 0 && !state.dokploy?.redisId && !state.infra?.redis?.password,
+    objectStorage: resources.buckets.length > 0 && (!state.infra?.objectStorage?.accessKey || !state.infra?.objectStorage?.secretKey),
+  };
+}
+
 function finishVerifyEndpoint(result, startedAt) {
   result.durationMs = Date.now() - startedAt;
   return result;
@@ -1771,6 +1784,9 @@ function deploymentArtifacts({ config, release, infraText = "", localContext = f
     };
   }
   const context = sourceBuildContext(config, release, { localContext });
+  const infraConfigArg = isSourceBackedCompose(config) && infraText
+    ? Buffer.from(infraText).toString("base64")
+    : "${ENCORE_INFRA_CONFIG_B64:?set ENCORE_INFRA_CONFIG_B64}";
   return {
     mode: "compose",
     images: {},
@@ -1780,7 +1796,7 @@ function deploymentArtifacts({ config, release, infraText = "", localContext = f
         backend: {
           dockerfile: config.paths.backendDockerfile,
           args: {
-            ENCORE_INFRA_CONFIG_B64: "${ENCORE_INFRA_CONFIG_B64:?set ENCORE_INFRA_CONFIG_B64}",
+            ENCORE_INFRA_CONFIG_B64: infraConfigArg,
           },
         },
         frontend: {

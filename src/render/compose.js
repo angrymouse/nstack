@@ -16,6 +16,7 @@ import { stringifyYaml } from "./yaml.js";
 export const ENCORE_MIGRATE_IMAGE = "migrate/migrate:v4.15.2";
 export const POSTGRES_INIT_IMAGE = "postgres:17-alpine";
 export const POSTGRES_INIT_SERVICE = "postgres-init";
+export const REDIS_IMAGE = "docker.dragonflydb.io/dragonflydb/dragonfly";
 
 export function renderDokployCompose(ctx) {
   const { config, images = {}, release, build = null } = ctx;
@@ -25,6 +26,8 @@ export function renderDokployCompose(ctx) {
   const objectStorageHost = objectStorageServiceHost(config);
   const nsqdHost = `${config.app.slug}-nsqd`;
   const nsqlookupdHost = `${config.app.slug}-nsqlookupd`;
+  const postgresService = inlinePostgresService(renderCtx);
+  const redisService = inlineRedisService(renderCtx);
   const postgresInitService = postgresDatabaseInitService(renderCtx);
   const migrationServices = databaseMigrationServices(renderCtx);
   const doc = {
@@ -73,13 +76,17 @@ export function renderDokployCompose(ctx) {
           },
         },
         healthcheck: nodeHttpHealthcheck("http://127.0.0.1:8080/__encore/healthz"),
-        depends_on: backendDependsOn(resources, migrationServices, postgresInitService),
+        depends_on: backendDependsOn(renderCtx, migrationServices, postgresInitService, postgresService, redisService),
       },
     },
   };
+  Object.assign(doc.services, postgresService);
+  Object.assign(doc.services, redisService);
   Object.assign(doc.services, postgresInitService);
   Object.assign(doc.services, migrationServices);
-  if (Object.keys(migrationServices).length > 0 || Object.keys(postgresInitService).length > 0) {
+  if (Object.keys(postgresService).length > 0) doc.volumes = { ...(doc.volumes || {}), postgres_data: {} };
+  if (Object.keys(redisService).length > 0) doc.volumes = { ...(doc.volumes || {}), redis_data: {} };
+  if (!pushProvision(renderCtx, "postgres") && (Object.keys(migrationServices).length > 0 || Object.keys(postgresInitService).length > 0)) {
     doc.networks = { ...(doc.networks || {}), "dokploy-network": { external: true } };
   }
 
@@ -119,8 +126,8 @@ export function renderDokployCompose(ctx) {
       restart: "unless-stopped",
       command: "/data",
       environment: {
-        RUSTFS_ACCESS_KEY: composeRequiredEnv(OBJECT_STORAGE_ACCESS_ENV),
-        RUSTFS_SECRET_KEY: composeRequiredEnv(OBJECT_STORAGE_SECRET_ENV),
+        RUSTFS_ACCESS_KEY: composeEnvValue(OBJECT_STORAGE_ACCESS_ENV, objectStorageFallbackAccessKey(renderCtx)),
+        RUSTFS_SECRET_KEY: composeEnvValue(OBJECT_STORAGE_SECRET_ENV, objectStorageFallbackSecretKey(renderCtx)),
         RUSTFS_CONSOLE_ENABLE: "false",
         RUSTFS_SERVER_DOMAINS: `${objectStorageHost}:${OBJECT_STORAGE_PORT}`,
       },
@@ -136,8 +143,8 @@ export function renderDokployCompose(ctx) {
       image: OBJECT_STORAGE_INIT_IMAGE,
       restart: "no",
       environment: {
-        RUSTFS_ACCESS_KEY: composeRequiredEnv(OBJECT_STORAGE_ACCESS_ENV),
-        RUSTFS_SECRET_KEY: composeRequiredEnv(OBJECT_STORAGE_SECRET_ENV),
+        RUSTFS_ACCESS_KEY: composeEnvValue(OBJECT_STORAGE_ACCESS_ENV, objectStorageFallbackAccessKey(renderCtx)),
+        RUSTFS_SECRET_KEY: composeEnvValue(OBJECT_STORAGE_SECRET_ENV, objectStorageFallbackSecretKey(renderCtx)),
       },
       entrypoint: ["/bin/sh"],
       command: ["-c", objectStorageInitScript(config, resources.buckets, objectStorageHost)],
@@ -212,14 +219,14 @@ function backendEnv(ctx) {
     NSTACK_DOMAIN: config.app.domain,
   };
   if (resources.databases.length > 0) {
-    env.NSTACK_POSTGRES_PASSWORD = "${NSTACK_POSTGRES_PASSWORD:?set NSTACK_POSTGRES_PASSWORD}";
+    env.NSTACK_POSTGRES_PASSWORD = composeEnvValue("NSTACK_POSTGRES_PASSWORD", postgresFallbackPassword(ctx));
   }
   if (resources.caches.length > 0) {
-    env.NSTACK_REDIS_PASSWORD = "${NSTACK_REDIS_PASSWORD:?set NSTACK_REDIS_PASSWORD}";
+    env.NSTACK_REDIS_PASSWORD = composeEnvValue("NSTACK_REDIS_PASSWORD", redisFallbackPassword(ctx));
   }
   if (resources.buckets.length > 0) {
-    env[OBJECT_STORAGE_ACCESS_ENV] = composeRequiredEnv(OBJECT_STORAGE_ACCESS_ENV);
-    env[OBJECT_STORAGE_SECRET_ENV] = composeRequiredEnv(OBJECT_STORAGE_SECRET_ENV);
+    env[OBJECT_STORAGE_ACCESS_ENV] = composeEnvValue(OBJECT_STORAGE_ACCESS_ENV, objectStorageFallbackAccessKey(ctx));
+    env[OBJECT_STORAGE_SECRET_ENV] = composeEnvValue(OBJECT_STORAGE_SECRET_ENV, objectStorageFallbackSecretKey(ctx));
   }
   for (const secret of resources.secrets) {
     env[secret] = `\${${secret}:?set ${secret}}`;
@@ -255,7 +262,8 @@ function nodeTcpHealthcheck(port) {
   };
 }
 
-function backendDependsOn(resources, migrationServices = {}, postgresInitService = {}) {
+function backendDependsOn(ctx, migrationServices = {}, postgresInitService = {}, postgresService = {}, redisService = {}) {
+  const { resources } = ctx;
   const deps = {};
   for (const serviceName of Object.keys(migrationServices)) {
     deps[serviceName] = { condition: "service_completed_successfully" };
@@ -263,28 +271,98 @@ function backendDependsOn(resources, migrationServices = {}, postgresInitService
   for (const serviceName of Object.keys(postgresInitService)) {
     if (Object.keys(migrationServices).length === 0) deps[serviceName] = { condition: "service_completed_successfully" };
   }
+  for (const serviceName of Object.keys(postgresService)) {
+    if (Object.keys(migrationServices).length === 0 && Object.keys(postgresInitService).length === 0) {
+      deps[serviceName] = { condition: "service_healthy" };
+    }
+  }
+  for (const serviceName of Object.keys(redisService)) {
+    deps[serviceName] = { condition: "service_started" };
+  }
   if (resources.topics.length > 0) deps.nsqd = { condition: "service_started" };
   return Object.keys(deps).length ? deps : undefined;
 }
 
+function inlinePostgresService(ctx) {
+  const { config, infra, resources } = ctx;
+  if (!pushProvision(ctx, "postgres") || !resources.databases.length || !infra?.postgres?.host) return {};
+  const serviceName = postgresServiceName(config);
+  return {
+    [serviceName]: {
+      image: POSTGRES_INIT_IMAGE,
+      restart: "unless-stopped",
+      environment: {
+        POSTGRES_DB: infra.postgres.database || defaultPostgresDatabase(config, resources),
+        POSTGRES_USER: infra.postgres.user || "nstack",
+        POSTGRES_PASSWORD: composeEnvValue("NSTACK_POSTGRES_PASSWORD", postgresFallbackPassword(ctx)),
+      },
+      volumes: ["postgres_data:/var/lib/postgresql/data"],
+      expose: ["5432"],
+      networks: {
+        default: {
+          aliases: serviceAliases(serviceName, serviceHostAlias(infra.postgres.host)),
+        },
+      },
+      healthcheck: {
+        test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""],
+        interval: "10s",
+        timeout: "5s",
+        retries: 5,
+        start_period: "10s",
+      },
+    },
+  };
+}
+
+function inlineRedisService(ctx) {
+  const { config, infra, resources } = ctx;
+  if (!pushProvision(ctx, "redis") || resources.caches.length === 0) return {};
+  const serviceName = redisServiceName(config);
+  return {
+    [serviceName]: {
+      image: REDIS_IMAGE,
+      restart: "unless-stopped",
+      entrypoint: ["/bin/sh", "-c"],
+      command: ["exec dragonfly --logtostderr --dir /data --dbfilename dump --requirepass \"$$REDIS_PASSWORD\""],
+      environment: {
+        REDIS_PASSWORD: composeEnvValue("NSTACK_REDIS_PASSWORD", redisFallbackPassword(ctx)),
+      },
+      volumes: ["redis_data:/data"],
+      expose: ["6379"],
+      networks: {
+        default: {
+          aliases: serviceAliases(serviceName, serviceHostAlias(infra?.redis?.host)),
+        },
+      },
+    },
+  };
+}
+
 function postgresDatabaseInitService(ctx) {
-  const { infra, resources } = ctx;
+  const { config, infra, resources } = ctx;
   if (!resources.databases.length || !infra?.postgres?.host) return {};
   const script = postgresDatabaseInitScript(infra, resources);
   if (!script) return {};
-  return {
-    [POSTGRES_INIT_SERVICE]: {
-      image: POSTGRES_INIT_IMAGE,
-      restart: "no",
-      environment: {
-        PGPASSWORD: composeRequiredEnv("NSTACK_POSTGRES_PASSWORD"),
-      },
-      entrypoint: ["/bin/sh", "-c"],
-      command: [script],
-      networks: {
-        "dokploy-network": {},
-      },
+  const service = {
+    image: POSTGRES_INIT_IMAGE,
+    restart: "no",
+    environment: {
+      PGPASSWORD: composeEnvValue("NSTACK_POSTGRES_PASSWORD", postgresFallbackPassword(ctx)),
     },
+    entrypoint: ["/bin/sh", "-c"],
+    command: [script],
+  };
+  if (pushProvision(ctx, "postgres")) {
+    service.depends_on = {
+      [postgresServiceName(config)]: { condition: "service_healthy" },
+    };
+  } else {
+    service.networks = {
+      "dokploy-network": {},
+    };
+  }
+  return {
+    [POSTGRES_INIT_SERVICE]: service,
   };
 }
 
@@ -293,14 +371,13 @@ function databaseMigrationServices(ctx) {
   if (!resources.databases.length || !infra?.postgres?.host) return {};
   return Object.fromEntries(resources.databases
     .filter((database) => database.migrations)
-    .map((database) => [
-      migrationServiceName(database),
-      {
+    .map((database) => {
+      const service = {
         image: ENCORE_MIGRATE_IMAGE,
         restart: "on-failure:5",
         command: [
           "-path=/migrations",
-          `-database=${postgresMigrationUrl(infra, resources, database)}`,
+          `-database=${postgresMigrationUrl(ctx, database)}`,
           "up",
         ],
         volumes: [
@@ -309,11 +386,14 @@ function databaseMigrationServices(ctx) {
         depends_on: {
           [POSTGRES_INIT_SERVICE]: { condition: "service_completed_successfully" },
         },
-        networks: {
+      };
+      if (!pushProvision(ctx, "postgres")) {
+        service.networks = {
           "dokploy-network": {},
-        },
-      },
-    ]));
+        };
+      }
+      return [migrationServiceName(database), service];
+    }));
 }
 
 function migrationServiceName(database) {
@@ -337,9 +417,10 @@ function normalizeRelativePath(value) {
     .replace(/\/+$/g, "");
 }
 
-function postgresMigrationUrl(infra, resources, database) {
+function postgresMigrationUrl(ctx, database) {
+  const { infra, resources } = ctx;
   const databaseName = postgresPhysicalDatabaseName(infra, resources, database);
-  return `postgres://${infra.postgres.user}:\${NSTACK_POSTGRES_PASSWORD:?set NSTACK_POSTGRES_PASSWORD}@${infra.postgres.host}/${databaseName}?sslmode=disable`;
+  return `postgres://${infra.postgres.user}:${composeEnvValue("NSTACK_POSTGRES_PASSWORD", postgresFallbackPassword(ctx))}@${infra.postgres.host}/${databaseName}?sslmode=disable`;
 }
 
 function postgresDatabaseInitScript(infra, resources) {
@@ -378,6 +459,14 @@ function postgresConnectionParts(hostWithPort) {
   const match = text.match(/^(.+):([0-9]+)$/);
   if (!match) return { host: text, port: "5432" };
   return { host: match[1], port: match[2] };
+}
+
+function serviceHostAlias(hostWithPort) {
+  return postgresConnectionParts(hostWithPort).host || "";
+}
+
+function serviceAliases(...values) {
+  return unique(values.filter(Boolean));
 }
 
 function unique(values) {
@@ -434,6 +523,51 @@ function objectStoragePublicProxyConfig(objectStorageHost) {
     "EOF",
     "exec nginx -g 'daemon off;'",
   ].join("\n");
+}
+
+function postgresServiceName(config) {
+  return `${config.app.slug}-postgres`;
+}
+
+function redisServiceName(config) {
+  return `${config.app.slug}-redis`;
+}
+
+function defaultPostgresDatabase(config, resources) {
+  if (resources.databases.length === 1 && resources.databases[0]?.name) return resources.databases[0].name;
+  return String(config.app.slug || "app").replaceAll("-", "_");
+}
+
+function pushProvision(ctx, key) {
+  return Boolean(ctx.pushProvision?.[key]);
+}
+
+function postgresFallbackPassword(ctx) {
+  return pushProvision(ctx, "postgres") ? fallbackSecret(ctx.config, "postgres") : "";
+}
+
+function redisFallbackPassword(ctx) {
+  return pushProvision(ctx, "redis") ? fallbackSecret(ctx.config, "redis") : "";
+}
+
+function objectStorageFallbackAccessKey(ctx) {
+  return pushProvision(ctx, "objectStorage") ? fallbackSecret(ctx.config, "object-access") : "";
+}
+
+function objectStorageFallbackSecretKey(ctx) {
+  return pushProvision(ctx, "objectStorage") ? fallbackSecret(ctx.config, "object-secret") : "";
+}
+
+function fallbackSecret(config, name) {
+  const slug = String(config.app.slug || "app")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "app";
+  return `nstack-${slug}-${name}`;
+}
+
+function composeEnvValue(name, fallback = "") {
+  return fallback ? `\${${name}:-${fallback}}` : composeRequiredEnv(name);
 }
 
 function composeRequiredEnv(name) {

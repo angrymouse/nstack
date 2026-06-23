@@ -128,6 +128,10 @@ Failed deploys print a Dokploy log tail when one is available. Use `nstack logs 
   long-running servers.
 - Keep backend resource declarations in Encore source. Let `nstack deploy`
   reconcile Dokploy from Encore metadata.
+- Provider-backed Git push deploys can start newly declared Postgres, cache, and
+  object storage resources from generated Compose fallbacks before the next
+  `nstack deploy` reconciles Dokploy-native resources. Push deploys do not
+  delete removed resources.
 - If multiple local deploy targets exist, interactive `nstack deploy` asks for
   the environment. Use `--env <name>` in automation.
 - This app can live in a monorepo. Run commands from this app directory or pass

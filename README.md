@@ -38,6 +38,10 @@ nstack can configure Dokploy Compose source deployments for GitHub, GitLab,
 Bitbucket, and Gitea/Forgejo when Dokploy has that provider connected. Plain Git
 source mode is available for custom hosts, but provider-backed sources are the
 path that gives Dokploy native push webhooks.
+Provider-backed push deploys can start newly declared Postgres, cache, and
+object storage resources from generated Compose fallbacks when local Dokploy
+state has not provisioned them yet. Run `nstack deploy` to reconcile those
+resources with native Dokploy resources.
 
 ## Daily Commands
 
@@ -118,6 +122,9 @@ For the detailed operator guide, see [USING_NSTACK.md](USING_NSTACK.md).
 - Dokploy Projects and Environments own the app.
 - Dokploy native Postgres and Redis-compatible Dragonfly cache resources are
   created when Encore declares SQL databases or cache clusters.
+- Source-backed Git pushes can add missing Postgres, cache, and object storage
+  services from generated Compose fallbacks. Destructive cleanup stays in
+  `nstack deploy`.
 - Dokploy Compose builds and runs the backend/frontend services plus generated
   support services such as NSQ for Pub/Sub and RustFS for Encore object storage
   buckets. Public buckets add a small RustFS public-route adapter so Dokploy can
