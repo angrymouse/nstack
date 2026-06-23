@@ -9,6 +9,8 @@ services:
       dockerfile: "frontend/Dockerfile"
       platforms:
         - "linux/amd64"
+      args:
+        NSTACK_GIT_COMMIT: "${NSTACK_GIT_COMMIT}"
     restart: "unless-stopped"
     environment:
       NODE_ENV: "production"
