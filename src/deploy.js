@@ -16,6 +16,7 @@ import {
   targetFromOptions,
 } from "./config.js";
 import { createDoctorReport, inspectResources, preflightError, preflightFailures } from "./doctor.js";
+import { launchBrowser } from "./open.js";
 import { normalizeTargetPlatform } from "./platform.js";
 import { createProgress } from "./progress.js";
 import {
@@ -291,7 +292,7 @@ export async function deploy(options = {}) {
   const pushAfterComposeUpdate = Boolean(sourcePrep.canPush && isProviderBackedSourceCompose(config) && previousCompose);
   let sourcePush = { pushed: false };
   if (!pushAfterComposeUpdate) {
-    sourcePush = await progress.step("Pushing source repository", () => pushSourceDeployArtifacts(cwd, config, composeSource, sourcePrep, timings));
+    sourcePush = await progress.step("Pushing source repository", () => pushSourceDeployArtifacts(cwd, config, composeSource, sourcePrep, timings, options));
   }
   const composeId = await progress.step("Updating Dokploy Compose app", () => provider.upsertCompose(
       environmentId,
@@ -320,7 +321,7 @@ export async function deploy(options = {}) {
   let checks = { deployment: null, timings: [] };
   try {
     if (pushAfterComposeUpdate) {
-      sourcePush = await progress.step("Pushing source repository", () => pushSourceDeployArtifacts(cwd, config, composeSource, sourcePrep, timings));
+      sourcePush = await progress.step("Pushing source repository", () => pushSourceDeployArtifacts(cwd, config, composeSource, sourcePrep, timings, options));
       sourcePush.webhookReady = true;
     }
     if (!shouldUseSourcePushDeployment(config, sourcePush)) {
@@ -1993,7 +1994,7 @@ async function prepareSourceDeployArtifacts(cwd, config, source = null, timings 
   };
 }
 
-async function pushSourceDeployArtifacts(cwd, config, source = null, prepared = null, timings = []) {
+async function pushSourceDeployArtifacts(cwd, config, source = null, prepared = null, timings = [], options = {}) {
   if (!source || source.sourceType === "raw" || !prepared?.canPush) return { pushed: false };
   const localCommit = prepared.localCommit || safeOutput("git", ["rev-parse", "HEAD"], cwd).trim();
   const upstreamCommit = prepared.upstreamCommit || safeOutput("git", ["rev-parse", "@{u}"], cwd).trim();
@@ -2007,16 +2008,16 @@ async function pushSourceDeployArtifacts(cwd, config, source = null, prepared = 
       const branch = config.deploy.source?.branch || source.branch || safeOutput("git", ["branch", "--show-current"], cwd).trim() || "main";
       pushInitialSourceBranch(cwd, branch);
     } catch (error) {
-      throw sourcePushError({ cwd, config, source, error });
+      throw sourcePushError({ cwd, config, source, error, options });
     }
   });
 
   return { pushed: Boolean(localCommit && localCommit !== upstreamCommit) };
 }
 
-async function syncSourceDeployArtifacts(cwd, config, source = null, timings = []) {
+async function syncSourceDeployArtifacts(cwd, config, source = null, timings = [], options = {}) {
   const prepared = await prepareSourceDeployArtifacts(cwd, config, source, timings);
-  const pushed = await pushSourceDeployArtifacts(cwd, config, source, prepared, timings);
+  const pushed = await pushSourceDeployArtifacts(cwd, config, source, prepared, timings, options);
   return { release: prepared.release, ...pushed };
 }
 
@@ -2079,13 +2080,18 @@ function pushInitialSourceBranch(cwd, branch) {
   run("git", ["push", "-u", "origin", `HEAD:${branch}`], { cwd, capture: true });
 }
 
-function sourcePushError({ cwd, config, source, error }) {
+function sourcePushError({ cwd, config, source, error, options = {} }) {
   const repository = config.deploy.source?.repository || source.repositoryUrl || "origin";
   const branch = config.deploy.source?.branch || source.branch || "main";
   const origin = safeOutput("git", ["remote", "get-url", "origin"], cwd).trim();
+  const authUrl = sourcePushAuthUrl(repository);
+  const authLines = authUrl && isGitAuthFailure(error)
+    ? sourcePushAuthRecovery(authUrl, options)
+    : [];
   return new Error([
     `Could not push source repository ${repository}.`,
     "Create a private repository on your Git provider if it does not exist, then push this app or fix your git credentials:",
+    ...authLines,
     ...sourcePushRemoteRecovery(origin, repository).map((step) => `  ${step}`),
     "  git add .",
     "  git commit -m \"init\"",
@@ -2093,6 +2099,44 @@ function sourcePushError({ cwd, config, source, error }) {
     "",
     `Git reported: ${summarizeError(error)}`,
   ].join("\n"), { cause: error });
+}
+
+function sourcePushAuthRecovery(authUrl, options = {}) {
+  if (options.json || options.print || options.noBrowser) return [`Open git authentication settings: ${authUrl}`];
+  return [launchBrowser(authUrl)
+    ? `Opened git authentication settings: ${authUrl}`
+    : `Open git authentication settings: ${authUrl}`];
+}
+
+function isGitAuthFailure(error) {
+  const message = summarizeError(error).toLowerCase();
+  return /auth|credential|permission denied|access denied|forbidden|unauthorized|not authorized|repository not found|could not read username|403|401/.test(message);
+}
+
+function sourcePushAuthUrl(repository) {
+  const parsed = parseGitRepositoryUrl(repository);
+  const host = parsed?.host?.toLowerCase() || "";
+  const base = parsed ? `${parsed.protocol}//${parsed.host}` : "";
+  if (!host) return "";
+  if (host === "github.com") return "https://github.com/settings/tokens";
+  if (host === "gitlab.com") return "https://gitlab.com/-/user_settings/personal_access_tokens";
+  if (host === "bitbucket.org") return "https://bitbucket.org/account/settings/app-passwords/";
+  if (host.includes("github")) return `${base}/settings/tokens`;
+  if (host.includes("gitlab")) return `${base}/-/user_settings/personal_access_tokens`;
+  if (host.includes("bitbucket")) return "https://bitbucket.org/account/settings/app-passwords/";
+  return `${base}/user/settings/applications`;
+}
+
+function parseGitRepositoryUrl(repository) {
+  const value = String(repository || "").trim();
+  if (!value || value === "origin") return null;
+  try {
+    const url = new URL(value);
+    return { protocol: url.protocol, host: url.host };
+  } catch {}
+  const ssh = value.match(/^(?:[^@\s]+@)?([^:\s]+):[^\s]+$/);
+  if (ssh) return { protocol: "https:", host: ssh[1] };
+  return null;
 }
 
 function sourcePushRemoteRecovery(origin, repository) {

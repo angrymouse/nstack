@@ -41,7 +41,7 @@ function targetUrl(kind, config) {
   return `https://${config.app.domain}`;
 }
 
-function launchBrowser(url) {
+export function launchBrowser(url) {
   try {
     const { command, args } = browserCommand(url);
     const child = spawn(command, args, {

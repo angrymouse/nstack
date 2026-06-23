@@ -2112,6 +2112,97 @@ test("deploy explains provider-backed source push failures before Compose upsert
   assert.equal(calls.includes("compose.update"), false);
 });
 
+test("deploy includes git auth settings link on auth push failure", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "nstack-source-push-auth-fail-"));
+  const cwd = path.join(root, "app");
+  const fakeBin = path.join(root, "bin");
+  const realGit = execFileSync("bash", ["-lc", "command -v git"], { encoding: "utf8" }).trim();
+  mkdirSync(path.join(cwd, "backend", "api"), { recursive: true });
+  mkdirSync(path.join(cwd, "frontend"), { recursive: true });
+  mkdirSync(fakeBin, { recursive: true });
+  writeFileSync(path.join(cwd, "nstack.config.mjs"), `export default {
+  app: { name: "Push Auth Fail", slug: "push-auth-fail" },
+  deploy: {
+    buildMode: "compose",
+    source: {
+      sourceType: "github",
+      repository: "https://github.com/acme/private.git",
+      branch: "main",
+      githubId: "github-1"
+    }
+  },
+  verify: { endpoints: [] },
+};\n`);
+  writeFileSync(path.join(cwd, "backend", "api", "status.ts"), `export const ok = true;\n`);
+  writeFileSync(path.join(cwd, "backend", "Dockerfile"), "FROM scratch\n");
+  writeFileSync(path.join(cwd, "frontend", "Dockerfile"), "FROM scratch\n");
+  writeFileSync(path.join(fakeBin, "git"), `#!/bin/sh
+if [ "$1" = "push" ]; then
+  echo "fatal: Authentication failed for 'https://github.com/acme/private.git/'" >&2
+  exit 128
+fi
+exec ${JSON.stringify(realGit)} "$@"
+`);
+  chmodSync(path.join(fakeBin, "git"), 0o755);
+  execFileSync("git", ["init"], { cwd, stdio: "ignore" });
+  execFileSync("git", ["config", "user.email", "nstack@example.test"], { cwd });
+  execFileSync("git", ["config", "user.name", "nstack"], { cwd });
+  execFileSync("git", ["branch", "-M", "main"], { cwd });
+  execFileSync("git", ["add", "."], { cwd });
+  execFileSync("git", ["commit", "-m", "initial"], { cwd, stdio: "ignore" });
+
+  const envKeys = ["NSTACK_DOMAIN", "DOKPLOY_URL", "DOKPLOY_API_KEY", "PATH"];
+  const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+  process.env.NSTACK_DOMAIN = "push-auth-fail.example.test";
+  process.env.DOKPLOY_URL = "https://dokploy.example.test";
+  process.env.DOKPLOY_API_KEY = "dummy";
+  process.env.PATH = `${fakeBin}${path.delimiter}${originalEnv.PATH || ""}`;
+
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    const parsed = new URL(String(url));
+    const endpoint = parsed.pathname.replace(/^\/api\/(?:trpc\/)?/, "");
+    calls.push(endpoint);
+    if ((init.method || "GET") === "GET") {
+      if (endpoint === "gitProvider.getAll") {
+        return Response.json({ json: [{ providerType: "github", github: { githubId: "github-1", isConfigured: true } }] });
+      }
+      if (endpoint === "github.githubProviders") return Response.json({ json: [{ githubId: "github-1" }] });
+      if (endpoint === "project.all" || endpoint === "environment.byProjectId") return Response.json({ json: [] });
+      if (endpoint === "settings.getIp") return Response.json({ json: "203.0.113.10" });
+    }
+    if (endpoint === "domain.validateDomain") return Response.json({ json: { isValid: true, resolvedIp: "203.0.113.10" } });
+    const ids = {
+      "project.create": { projectId: "project-1" },
+      "environment.create": { environmentId: "environment-1" },
+    };
+    return Response.json({ json: ids[endpoint] || {} });
+  };
+
+  try {
+    await assert.rejects(
+      deploy({ cwd, noWait: true, skipVerify: true, skipStatus: true, yes: true, noBrowser: true }),
+      (error) => {
+        assert.match(error.message, /Could not push source repository https:\/\/github\.com\/acme\/private\.git/);
+        assert.match(error.message, /Open git authentication settings: https:\/\/github\.com\/settings\/tokens/);
+        assert.doesNotMatch(error.message, /Opened git authentication settings/);
+        assert.match(error.message, /Git reported: git push -u origin main failed/);
+        return true;
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const key of envKeys) {
+      if (originalEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = originalEnv[key];
+    }
+  }
+
+  assert.equal(calls.includes("compose.create"), false);
+  assert.equal(calls.includes("compose.update"), false);
+});
+
 test("deploy passes target platform to backend and frontend image builds", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "nstack-platform-build-"));
   const fakeBin = path.join(cwd, "bin");

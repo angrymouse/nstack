@@ -135,7 +135,9 @@ Failed deploys print a Dokploy log tail when one is available. Use `nstack logs 
 - If a previous push already started fallback resources, a later local
   `nstack deploy` keeps those Compose-managed services and credentials.
   Provider-backed `nstack deploy` updates Compose before pushing and waits for
-  the push webhook deployment when that push occurs.
+  the push webhook deployment when that push occurs. On source push
+  authentication failures, nstack prints the provider auth settings URL and
+  opens it unless `--print`, `--no-browser`, or `--json` is used.
 - If multiple local deploy targets exist, interactive `nstack deploy` asks for
   the environment. Use `--env <name>` in automation.
 - This app can live in a monorepo. Run commands from this app directory or pass
