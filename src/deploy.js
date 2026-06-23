@@ -1785,6 +1785,9 @@ function deploymentArtifacts({ config, release, infraText = "", localContext = f
         },
         frontend: {
           dockerfile: config.paths.frontendDockerfile,
+          args: {
+            NSTACK_GIT_COMMIT: "${NSTACK_GIT_COMMIT}",
+          },
         },
       },
     },

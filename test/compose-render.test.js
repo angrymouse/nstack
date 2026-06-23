@@ -71,7 +71,12 @@ test("compose renderer keeps source build values in Dokploy env placeholders", (
             NSTACK_IMAGE_TAG: "${NSTACK_IMAGE_TAG:-local}",
           },
         },
-        frontend: { dockerfile: "frontend/Dockerfile" },
+        frontend: {
+          dockerfile: "frontend/Dockerfile",
+          args: {
+            NSTACK_GIT_COMMIT: "${NSTACK_GIT_COMMIT}",
+          },
+        },
       },
     },
     release: { commit: "abc123", tag: "abc123" },
@@ -79,6 +84,7 @@ test("compose renderer keeps source build values in Dokploy env placeholders", (
 
   assert.match(output, /context: "\$\{NSTACK_BUILD_CONTEXT:-\.\.\/\.\.\}"/);
   assert.match(output, /ENCORE_INFRA_CONFIG_B64: "\$\{ENCORE_INFRA_CONFIG_B64:\?set ENCORE_INFRA_CONFIG_B64\}"/);
+  assert.match(output, /NSTACK_GIT_COMMIT: "\$\{NSTACK_GIT_COMMIT\}"/);
   assert.doesNotMatch(output, /abc123/);
 });
 
