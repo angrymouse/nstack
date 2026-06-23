@@ -1559,6 +1559,143 @@ test("deploy configures Gitea source-backed Compose apps for push deployments", 
   assert.equal(env.NSTACK_IMAGE_TAG, "source-feature-push-deploy");
 });
 
+test("source-backed deploy preserves resources provisioned by an earlier push", async () => {
+  const cwd = mkdtempSync(path.join(tmpdir(), "nstack-source-adopt-"));
+  const remoteRoot = mkdtempSync(path.join(tmpdir(), "nstack-source-adopt-remote-"));
+  const remote = path.join(remoteRoot, "repo.git");
+  mkdirSync(path.join(cwd, ".nstack"), { recursive: true });
+  mkdirSync(path.join(cwd, "backend", "api"), { recursive: true });
+  mkdirSync(path.join(cwd, "frontend"), { recursive: true });
+  writeFileSync(path.join(cwd, "nstack.config.mjs"), `export default {
+  app: { name: "Source Adopt", slug: "source-adopt" },
+  deploy: {
+    buildMode: "compose",
+    source: {
+      repository: "git@git.example.test:acme/source-adopt.git",
+      branch: "main",
+      giteaId: "gitea-1"
+    }
+  },
+  verify: { endpoints: [] },
+};\n`);
+  writeFileSync(path.join(cwd, "backend", "api", "resources.ts"), [
+    'import { SQLDatabase } from "encore.dev/storage/sqldb";',
+    'import { CacheCluster } from "encore.dev/storage/cache";',
+    'export const db = new SQLDatabase("app", {});',
+    'export const cache = new CacheCluster("sessions");',
+  ].join("\n"));
+  writeFileSync(path.join(cwd, "backend", "Dockerfile"), "FROM scratch\n");
+  writeFileSync(path.join(cwd, "frontend", "Dockerfile"), "FROM scratch\n");
+  writeFileSync(path.join(cwd, ".nstack", "state.json"), `${JSON.stringify({
+    dokploy: {
+      projectId: "project-1",
+      environmentId: "environment-1",
+      composeId: "compose-1",
+    },
+  }, null, 2)}\n`);
+  execFileSync("git", ["init", "--bare", remote], { stdio: "ignore" });
+  execFileSync("git", ["init"], { cwd, stdio: "ignore" });
+  execFileSync("git", ["config", "user.email", "nstack@example.test"], { cwd });
+  execFileSync("git", ["config", "user.name", "nstack"], { cwd });
+  execFileSync("git", ["branch", "-M", "main"], { cwd });
+  execFileSync("git", ["remote", "add", "origin", remote], { cwd });
+  execFileSync("git", ["add", "."], { cwd });
+  execFileSync("git", ["commit", "-m", "initial"], { cwd, stdio: "ignore" });
+  execFileSync("git", ["push", "-u", "origin", "main"], { cwd, stdio: "ignore" });
+  writeFileSync(path.join(cwd, "backend", "api", "status.ts"), "export const changed = true;\n");
+  execFileSync("git", ["add", "backend/api/status.ts"], { cwd });
+  execFileSync("git", ["commit", "-m", "change after push-provisioned resources"], { cwd, stdio: "ignore" });
+
+  const envKeys = ["NSTACK_DOMAIN", "DOKPLOY_URL", "DOKPLOY_API_KEY"];
+  const originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+  process.env.NSTACK_DOMAIN = "source-adopt.example.test";
+  process.env.DOKPLOY_URL = "https://dokploy.example.test";
+  process.env.DOKPLOY_API_KEY = "dummy";
+
+  const calls = [];
+  let savedEnv = "";
+  let updatedCompose = "";
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    const parsed = new URL(String(url));
+    const endpoint = parsed.pathname.replace(/^\/api\/(?:trpc\/)?/, "");
+    const body = init.body ? JSON.parse(init.body) : null;
+    calls.push({ endpoint, method: init.method || "GET", body });
+    if ((init.method || "GET") === "GET") {
+      if (endpoint === "project.all") return Response.json({ json: [{ projectId: "project-1", name: "Source Adopt" }] });
+      if (endpoint === "environment.byProjectId") return Response.json({ json: [{ environmentId: "environment-1", name: "production" }] });
+      if (endpoint === "compose.one") {
+        return Response.json({ json: {
+          composeId: "compose-1",
+          name: "source-adopt-app",
+          composeFile: [
+            "services:",
+            "  source-adopt-postgres:",
+            "    image: postgres:17-alpine",
+            "    volumes:",
+            "      - postgres_data:/var/lib/postgresql/data",
+            "  source-adopt-redis:",
+            "    image: docker.dragonflydb.io/dragonflydb/dragonfly",
+            "    volumes:",
+            "      - redis_data:/data",
+            "volumes:",
+            "  postgres_data: {}",
+            "  redis_data: {}",
+          ].join("\n"),
+          env: "NSTACK_POSTGRES_PASSWORD=existing-postgres\n",
+        } });
+      }
+      if (endpoint === "gitProvider.getAll") {
+        return Response.json({ json: [{ providerType: "gitea", gitea: { giteaId: "gitea-1", giteaUrl: "https://git.example.test", isConfigured: true } }] });
+      }
+      if (endpoint === "gitea.giteaProviders") return Response.json({ json: [{ giteaId: "gitea-1" }] });
+      if (endpoint === "domain.byComposeId" || endpoint === "schedule.list" || endpoint.endsWith(".search")) return Response.json({ json: [] });
+      if (endpoint === "settings.getIp") return Response.json({ json: "203.0.113.10" });
+    }
+    if (endpoint === "compose.update") updatedCompose = body.composeFile || updatedCompose;
+    if (endpoint === "compose.saveEnvironment") savedEnv = body.env;
+    if (endpoint === "domain.validateDomain") return Response.json({ json: { isValid: true, resolvedIp: "203.0.113.10" } });
+    if (endpoint === "domain.create") return Response.json({ json: { domainId: "domain-1" } });
+    return Response.json({ json: {} });
+  };
+
+  try {
+    const report = await deploy({
+      cwd,
+      noWait: true,
+      skipVerify: true,
+      skipStatus: true,
+      yes: true,
+    });
+    const finalCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8" }).trim();
+    const remoteCommit = execFileSync("git", ["rev-parse", "refs/heads/main"], { cwd: remote, encoding: "utf8" }).trim();
+    assert.equal(report.release.commit, finalCommit);
+    assert.equal(remoteCommit, finalCommit);
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const key of envKeys) {
+      if (originalEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = originalEnv[key];
+    }
+  }
+
+  assert.equal(calls.some((call) => call.endpoint === "postgres.create"), false);
+  assert.equal(calls.some((call) => call.endpoint === "redis.create"), false);
+  assert.equal(calls.some((call) => call.endpoint === "compose.deploy"), false);
+  assert.match(updatedCompose, /source-adopt-postgres:/);
+  assert.match(updatedCompose, /source-adopt-redis:/);
+  assert.match(savedEnv, /NSTACK_POSTGRES_PASSWORD=existing-postgres/);
+  assert.match(savedEnv, /NSTACK_REDIS_PASSWORD=nstack-source-adopt-redis/);
+
+  const state = JSON.parse(readFileSync(path.join(cwd, ".nstack", "state.json"), "utf8"));
+  assert.equal(state.dokploy.postgresId, undefined);
+  assert.equal(state.dokploy.redisId, undefined);
+  assert.equal(state.infra.postgres.password, "existing-postgres");
+  assert.equal(state.infra.postgres.composeManaged, true);
+  assert.equal(state.infra.redis.password, "nstack-source-adopt-redis");
+  assert.equal(state.infra.redis.composeManaged, true);
+});
+
 test("deploy auto-commits generated source-backed artifacts before triggering Dokploy", async () => {
   const root = mkdtempSync(path.join(tmpdir(), "nstack-source-sync-"));
   const cwd = path.join(root, "app");

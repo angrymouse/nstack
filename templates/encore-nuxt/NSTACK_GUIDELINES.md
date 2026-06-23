@@ -46,6 +46,10 @@ For source-backed/git deploys, destructive resource cleanup is skipped.
 Provider-backed source pushes can start newly declared Postgres, cache, and
 object storage resources from generated Compose fallbacks. Run `nstack deploy`
 to reconcile them with Dokploy-native resources.
+If a previous push already started fallback resources, a later local
+`nstack deploy` keeps those Compose-managed services and credentials.
+Provider-backed `nstack deploy` updates Compose before pushing and waits for the
+push webhook deployment when that push occurs.
 
 ## Frontend Design
 

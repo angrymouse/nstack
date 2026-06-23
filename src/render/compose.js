@@ -558,7 +558,7 @@ function objectStorageFallbackSecretKey(ctx) {
   return pushProvision(ctx, "objectStorage") ? fallbackSecret(ctx.config, "object-secret") : "";
 }
 
-function fallbackSecret(config, name) {
+export function composeFallbackSecret(config, name) {
   const slug = String(config.app.slug || "app")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
@@ -572,6 +572,10 @@ function composeEnvValue(name, fallback = "") {
 
 function composeRequiredEnv(name) {
   return `\${${name}:?set ${name}}`;
+}
+
+function fallbackSecret(config, name) {
+  return composeFallbackSecret(config, name);
 }
 
 function composeRuntimeEnv(name) {

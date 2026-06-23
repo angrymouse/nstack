@@ -33,7 +33,7 @@ import {
   objectStorageInfra,
   objectStorageServiceHost,
 } from "./object-storage.js";
-import { renderDokployCompose } from "./render/compose.js";
+import { composeFallbackSecret, renderDokployCompose } from "./render/compose.js";
 import { renderEncoreInfra } from "./render/infra.js";
 import { Prompter } from "./prompt.js";
 import { createStatusReport, statusCheckError } from "./status.js";
@@ -203,6 +203,15 @@ export async function deploy(options = {}) {
   if (previousEnvironmentId && previousEnvironmentId !== environmentId) clearDokployResourceState(nextState.dokploy);
   nextState.dokploy.environmentId = environmentId;
   persistState();
+  const previousCompose = await progress.step("Reading existing Dokploy Compose app", () => readExistingCompose(provider, environmentId, nextState));
+  const composeProvisioned = adoptComposeProvisionedInfra({ config, resources, state: nextState, infra, compose: previousCompose });
+  if (composeProvisioned.postgres) safeGeneratedInfra.postgres = true;
+  if (composeProvisioned.redis) safeGeneratedInfra.redis = true;
+  if (composeProvisioned.objectStorage) safeGeneratedInfra.objectStorage = true;
+  if (composeProvisioned.postgres || composeProvisioned.redis || composeProvisioned.objectStorage) {
+    nextState.infra = infra;
+    persistState();
+  }
 
   // Declined cleanup can update nstack.config.mjs, so this must stay before
   // source-backed dirty checks and commit/push handling below.
@@ -229,7 +238,7 @@ export async function deploy(options = {}) {
     });
   }
 
-  if (resources.databases.length > 0) {
+  if (resources.databases.length > 0 && !composeProvisioned.postgres) {
     await progress.step("Ensuring Postgres instances", async () => {
       const existingPostgresId = await provider.resolvePostgresId(environmentId);
       if (existingPostgresId && generatedInfraSecrets.postgres) {
@@ -247,7 +256,7 @@ export async function deploy(options = {}) {
       persistState();
     });
   }
-  if (resources.caches.length > 0) {
+  if (resources.caches.length > 0 && !composeProvisioned.redis) {
     await progress.step("Ensuring Redis instances", async () => {
       const existingRedisId = await provider.resolveRedisId(environmentId);
       if (existingRedisId && generatedInfraSecrets.redis) {
@@ -277,8 +286,13 @@ export async function deploy(options = {}) {
 
   const composeSource = await progress.step("Resolving Git source", () => provider.resolveComposeSource());
   await maybeCommitSourceUserChanges(cwd, composeSource, options);
-  const sourceSync = await progress.step("Pushing source repository", () => syncSourceDeployArtifacts(cwd, config, composeSource, timings));
-  if (sourceSync.release) release = sourceSync.release;
+  const sourcePrep = await progress.step("Preparing source repository", () => prepareSourceDeployArtifacts(cwd, config, composeSource, timings));
+  if (sourcePrep.release) release = sourcePrep.release;
+  const pushAfterComposeUpdate = Boolean(sourcePrep.canPush && isProviderBackedSourceCompose(config) && previousCompose);
+  let sourcePush = { pushed: false };
+  if (!pushAfterComposeUpdate) {
+    sourcePush = await progress.step("Pushing source repository", () => pushSourceDeployArtifacts(cwd, config, composeSource, sourcePrep, timings));
+  }
   const composeId = await progress.step("Updating Dokploy Compose app", () => provider.upsertCompose(
       environmentId,
       renderDokployCompose({ ...ctx, state: nextState }),
@@ -305,7 +319,13 @@ export async function deploy(options = {}) {
 
   let checks = { deployment: null, timings: [] };
   try {
-    await progress.step("Triggering Dokploy deployment", () => provider.deploy(composeId, release));
+    if (pushAfterComposeUpdate) {
+      sourcePush = await progress.step("Pushing source repository", () => pushSourceDeployArtifacts(cwd, config, composeSource, sourcePrep, timings));
+      sourcePush.webhookReady = true;
+    }
+    if (!shouldUseSourcePushDeployment(config, sourcePush)) {
+      await progress.step("Triggering Dokploy deployment", () => provider.deploy(composeId, release));
+    }
     nextState.lastAttempt = releaseAttempt(release, {
       status: "triggered",
       triggeredAt: nextState.lastAttempt.triggeredAt,
@@ -330,7 +350,10 @@ export async function deploy(options = {}) {
       return report;
     }
 
-    checks = await progress.step("Verifying deployment", () => runReleaseChecks(cwd, config, release, options), { allowOutput: true });
+    checks = await progress.step("Verifying deployment", () => runReleaseChecks(cwd, config, release, {
+      ...options,
+      requireDeploymentMatch: isSourceBackedCompose(config) || options.requireDeploymentMatch,
+    }), { allowOutput: true });
     timings.push(...checks.timings);
   } catch (error) {
     await printDeploymentLogsForError({ cwd, config, state: nextState, release, error, options });
@@ -466,6 +489,61 @@ async function pruneRemovedDokployResources({ provider, environmentId, resources
       await resourceCleanup.beforeRemove(resource);
     }
   }
+}
+
+async function readExistingCompose(provider, environmentId, state) {
+  const composeId = state.dokploy?.composeId || await provider.resolveComposeId(environmentId);
+  if (!composeId) return null;
+  state.dokploy.composeId = composeId;
+  return await provider.client.apiGet("compose.one", { composeId }).catch(() => ({ composeId }));
+}
+
+function adoptComposeProvisionedInfra({ config, resources, state, infra, compose }) {
+  const result = { postgres: false, redis: false, objectStorage: false };
+  if (!isSourceBackedCompose(config) || !compose) return result;
+  const env = parseDotEnv(compose?.env || compose?.environment || "");
+  if (resources.databases.length > 0 && !state.dokploy?.postgresId && composeHasServiceOrVolume(compose, `${config.app.slug}-postgres`, "postgres_data")) {
+    infra.postgres = {
+      ...(infra.postgres || {}),
+      appName: infra.postgres?.appName || `${config.app.slug}-postgres`,
+      host: infra.postgres?.host || `${config.app.slug}-postgres:5432`,
+      database: infra.postgres?.database || defaultPostgresDatabase(config, resources),
+      user: infra.postgres?.user || "nstack",
+      password: env.NSTACK_POSTGRES_PASSWORD || composeManagedSecret(state.infra?.postgres) || composeFallbackSecret(config, "postgres"),
+      composeManaged: true,
+    };
+    result.postgres = true;
+  }
+  if (resources.caches.length > 0 && !state.dokploy?.redisId && composeHasServiceOrVolume(compose, `${config.app.slug}-redis`, "redis_data")) {
+    infra.redis = {
+      ...(infra.redis || {}),
+      appName: infra.redis?.appName || `${config.app.slug}-redis`,
+      host: infra.redis?.host || `${config.app.slug}-redis:6379`,
+      password: env.NSTACK_REDIS_PASSWORD || composeManagedSecret(state.infra?.redis) || composeFallbackSecret(config, "redis"),
+      composeManaged: true,
+    };
+    result.redis = true;
+  }
+  if (resources.buckets.length > 0 && composeHasServiceOrVolume(compose, "rustfs", "rustfs_data")) {
+    const currentObjectStorage = state.infra?.objectStorage?.composeManaged
+      ? state.infra.objectStorage
+      : {
+          ...(infra.objectStorage || {}),
+          accessKey: "",
+          secretKey: "",
+        };
+    infra.objectStorage = objectStorageInfra(config, currentObjectStorage, {
+      accessKey: env[OBJECT_STORAGE_ACCESS_ENV] || composeManagedSecret(state.infra?.objectStorage, "accessKey") || composeFallbackSecret(config, "object-access"),
+      secretKey: env[OBJECT_STORAGE_SECRET_ENV] || composeManagedSecret(state.infra?.objectStorage, "secretKey") || composeFallbackSecret(config, "object-secret"),
+    });
+    infra.objectStorage.composeManaged = true;
+    result.objectStorage = true;
+  }
+  return result;
+}
+
+function composeManagedSecret(section, key = "password") {
+  return section?.composeManaged ? section[key] || "" : "";
 }
 
 function deleteInfraSection(state, infra, key) {
@@ -1641,8 +1719,22 @@ function expectedEndpointCommitForReleaseChecks(config, release, options = {}) {
 }
 
 function isSourceBackedCompose(config) {
-  const sourceType = config.deploy.source?.sourceType || "";
+  const sourceType = sourceTypeForConfig(config);
   return config.deploy.buildMode === "compose" && Boolean(sourceType) && sourceType !== "raw";
+}
+
+function isProviderBackedSourceCompose(config) {
+  return config.deploy.buildMode === "compose" && ["github", "gitlab", "bitbucket", "gitea"].includes(sourceTypeForConfig(config));
+}
+
+function sourceTypeForConfig(config) {
+  const source = config.deploy.source || {};
+  if (source.sourceType) return source.sourceType;
+  if (source.githubId) return "github";
+  if (source.gitlabId) return "gitlab";
+  if (source.bitbucketId) return "bitbucket";
+  if (source.giteaId) return "gitea";
+  return "";
 }
 
 function sourcePushProvisioning({ config, resources, state }) {
@@ -1650,8 +1742,8 @@ function sourcePushProvisioning({ config, resources, state }) {
     return { postgres: false, redis: false, objectStorage: false };
   }
   return {
-    postgres: resources.databases.length > 0 && !state.dokploy?.postgresId && !state.infra?.postgres?.password,
-    redis: resources.caches.length > 0 && !state.dokploy?.redisId && !state.infra?.redis?.password,
+    postgres: resources.databases.length > 0 && !state.dokploy?.postgresId,
+    redis: resources.caches.length > 0 && !state.dokploy?.redisId,
     objectStorage: resources.buckets.length > 0 && (!state.infra?.objectStorage?.accessKey || !state.infra?.objectStorage?.secretKey),
   };
 }
@@ -1857,8 +1949,8 @@ function sourceImageTag(source) {
   return `source-${branch}`;
 }
 
-async function syncSourceDeployArtifacts(cwd, config, source = null, timings = []) {
-  if (!source || source.sourceType === "raw") return { release: null };
+async function prepareSourceDeployArtifacts(cwd, config, source = null, timings = []) {
+  if (!source || source.sourceType === "raw") return { release: null, canPush: false, localCommit: "" };
   const repositoryUrl = config.deploy.source?.repository || source.repositoryUrl || "";
   if (repositoryUrl && safeOutput("git", ["rev-parse", "--is-inside-work-tree"], cwd).trim() !== "true") {
     await timedAsync("source: init git", true, timings, async () => {
@@ -1893,6 +1985,18 @@ async function syncSourceDeployArtifacts(cwd, config, source = null, timings = [
     });
   }
 
+  return {
+    release: releaseInfo(config, cwd),
+    canPush: true,
+    localCommit: safeOutput("git", ["rev-parse", "HEAD"], cwd).trim(),
+    upstreamCommit: safeOutput("git", ["rev-parse", "@{u}"], cwd).trim(),
+  };
+}
+
+async function pushSourceDeployArtifacts(cwd, config, source = null, prepared = null, timings = []) {
+  if (!source || source.sourceType === "raw" || !prepared?.canPush) return { pushed: false };
+  const localCommit = prepared.localCommit || safeOutput("git", ["rev-parse", "HEAD"], cwd).trim();
+  const upstreamCommit = prepared.upstreamCommit || safeOutput("git", ["rev-parse", "@{u}"], cwd).trim();
   await timedAsync("source: push", true, timings, async () => {
     try {
       const upstream = safeOutput("git", ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], cwd).trim();
@@ -1907,7 +2011,17 @@ async function syncSourceDeployArtifacts(cwd, config, source = null, timings = [
     }
   });
 
-  return { release: releaseInfo(config, cwd) };
+  return { pushed: Boolean(localCommit && localCommit !== upstreamCommit) };
+}
+
+async function syncSourceDeployArtifacts(cwd, config, source = null, timings = []) {
+  const prepared = await prepareSourceDeployArtifacts(cwd, config, source, timings);
+  const pushed = await pushSourceDeployArtifacts(cwd, config, source, prepared, timings);
+  return { release: prepared.release, ...pushed };
+}
+
+function shouldUseSourcePushDeployment(config, sourcePush) {
+  return isProviderBackedSourceCompose(config) && Boolean(sourcePush?.pushed && sourcePush?.webhookReady);
 }
 
 async function maybeCommitSourceUserChanges(cwd, source = null, options = {}) {
