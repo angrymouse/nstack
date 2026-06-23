@@ -74,7 +74,15 @@ Before changing code, read [NSTACK_GUIDELINES.md](./NSTACK_GUIDELINES.md).
   decide, act, or understand current state. Remove implementation facts that
   only make copy sound more technical.
 - Avoid decorative badges, status pills, pulsing dots, and tiny uppercase
-  subtitles when they do not carry real product or workflow meaning.
+  subtitles when they do not carry real product or workflow meaning. Tiny
+  labels above headings are a common antipattern, especially when they repeat
+  the page idea or sit inside a bordered card, shadowed pill, or standalone
+  surface for decoration.
+- Treat ornamental framing as design debt. A small label above a hero title,
+  centered badge, lone pill, or card whose job is only to announce the section
+  is usually a layout crutch. Put essential context in the heading, body copy,
+  navigation, tabs, or local metadata. Add a card only when it groups controls,
+  repeated records, or content that needs visual separation.
 - Check every visible line of website copy after editing. Each line should tell
   the user what nstack is, what they can do, what changed, or what command to
   run. Replace buzzphrases with concrete wording that names the real action.

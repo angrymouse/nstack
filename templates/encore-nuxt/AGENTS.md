@@ -56,9 +56,12 @@ Failed deploys print a Dokploy log tail when one is available. Use `nstack logs 
   screen. Keep details that help the reader decide, act, or understand current
   state. Remove implementation facts that only make copy sound more technical.
   Avoid decorative badges, status pills, pulsing dots, and tiny uppercase
-  subtitles when they do not carry real product or workflow meaning. Labels
-  such as `LIVE`, `Open Source`, or section eyebrows should earn their place;
-  otherwise remove them and let the heading or body copy do the work.
+  subtitles when they do not carry real product or workflow meaning. Tiny
+  labels above headings are a common antipattern, especially when they repeat
+  the page idea or sit inside a bordered card, shadowed pill, or standalone
+  surface for decoration. Labels such as `LIVE`, `Open Source`, or section
+  eyebrows should earn their place; otherwise remove them and let the heading
+  or body copy do the work.
   For website and frontend copy, check every visible line after editing. Each
   line should tell the user what the product is, what they can do, what changed,
   or what command to run. Replace buzzphrases such as `Ship from the directory
@@ -96,6 +99,11 @@ Failed deploys print a Dokploy log tail when one is available. Use `nstack logs 
   Grotesque, Absans, or another family that fits the subject. Pair display and
   body fonts deliberately, tune weights, spacing, and line height, and verify
   the result on mobile and desktop.
+- Treat ornamental framing as design debt. A small label above a hero title,
+  centered badge, lone pill, or card whose job is only to announce the section
+  is usually a layout crutch. Put essential context in the heading, body copy,
+  navigation, tabs, or local metadata. Add a card only when it groups controls,
+  repeated records, or content that needs visual separation.
 - Prefer restrained surfaces over glow effects on cards, panels, and buttons.
   Avoid neon edges, blurred color blobs, spotlight halos, and outer glow
   shadows as decoration around containers. Use hierarchy, typography, spacing,
