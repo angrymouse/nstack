@@ -11,6 +11,8 @@ RUN corepack enable && corepack prepare pnpm@10.18.3 --activate
 
 ENV NUXT_TELEMETRY_DISABLED=1
 
+ARG NSTACK_GIT_COMMIT=local
+
 COPY pnpm-workspace.yaml ./
 COPY pnpm-lock.yaml ./
 
@@ -29,6 +31,8 @@ COPY frontend/app ./frontend/app
 COPY frontend/public ./frontend/public
 
 WORKDIR /workspace/frontend
+RUN BUILD_COMMIT="${NSTACK_GIT_COMMIT}" && echo "Frontend build commit: $BUILD_COMMIT"
+
 RUN NODE_OPTIONS=--experimental-sqlite \
   ./node_modules/.bin/nuxt prepare --logLevel=silent
 
