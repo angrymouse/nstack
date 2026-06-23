@@ -1,4 +1,5 @@
 import { api } from "encore.dev/api";
+import { secret } from "encore.dev/config";
 import {
   CacheCluster,
   StructKeyspace,
@@ -45,6 +46,12 @@ interface PackageManifest {
   version?: string;
 }
 
+interface ReleaseNotification {
+  commit: string;
+  version: string;
+  notifiedAt: string;
+}
+
 const giteaBaseUrl = cleanBaseUrl(process.env.NSTACK_RELEASE_GITEA_URL || "https://git.nik.technology");
 const repositoryOwner = process.env.NSTACK_RELEASE_GITEA_OWNER || "angrymouse";
 const repositoryName = process.env.NSTACK_RELEASE_GITEA_REPO || "nstack";
@@ -52,6 +59,9 @@ const releaseBranch = process.env.NSTACK_RELEASE_GITEA_BRANCH || "main";
 const changelogLimit = positiveInteger(process.env.NSTACK_RELEASE_CHANGELOG_LIMIT, 8);
 const cacheMinutes = positiveInteger(process.env.NSTACK_RELEASE_CACHE_MINUTES, 15);
 const staleCacheHours = positiveInteger(process.env.NSTACK_RELEASE_STALE_CACHE_HOURS, 24);
+const notificationCacheHours = positiveInteger(process.env.NSTACK_RELEASE_NOTIFICATION_CACHE_HOURS, 24 * 365);
+const discordRequestTimeoutMs = positiveInteger(process.env.NSTACK_RELEASE_DISCORD_TIMEOUT_MS, 2000);
+const discordWebhookUrl = secret("NSTACK_RELEASE_DISCORD_WEBHOOK_URL");
 
 const releaseMetadataCache = new CacheCluster("release-metadata", {
   evictionPolicy: "allkeys-lru",
@@ -63,6 +73,10 @@ const freshReleases = new StructKeyspace<string, LatestReleaseResponse>(releaseM
 const staleReleases = new StructKeyspace<string, LatestReleaseResponse>(releaseMetadataCache, {
   keyPattern: "stale/:key",
   defaultExpiry: expireInHours(staleCacheHours),
+});
+const notifiedReleases = new StructKeyspace<string, ReleaseNotification>(releaseMetadataCache, {
+  keyPattern: "discord/:key",
+  defaultExpiry: expireInHours(notificationCacheHours),
 });
 
 export const latest = api(
@@ -78,6 +92,7 @@ async function cachedLatestRelease(): Promise<LatestReleaseResponse> {
   try {
     const release = await fetchLatestRelease();
     await writeCache(key, release);
+    await notifyDiscordOnce(key, release);
     return release;
   } catch (error) {
     const stale = await readCache(staleReleases, key);
@@ -124,6 +139,83 @@ async function writeCache(key: string, release: LatestReleaseResponse): Promise<
   } catch {
     // Release checks can still return fresh Gitea data when cache storage is unavailable.
   }
+}
+
+async function readNotification(key: string): Promise<ReleaseNotification | undefined> {
+  try {
+    return await notifiedReleases.get(key);
+  } catch {
+    return undefined;
+  }
+}
+
+async function writeNotification(key: string, release: LatestReleaseResponse): Promise<void> {
+  try {
+    await notifiedReleases.set(key, {
+      commit: release.commit,
+      version: release.version,
+      notifiedAt: new Date().toISOString(),
+    });
+  } catch {
+    // Cache failures should not break release metadata responses.
+  }
+}
+
+async function notifyDiscordOnce(key: string, release: LatestReleaseResponse): Promise<void> {
+  const webhookUrl = releaseDiscordWebhookUrl();
+  if (!webhookUrl || !release.commit) return;
+
+  const previous = await readNotification(key);
+  if (previous?.commit === release.commit && previous.version === release.version) return;
+
+  try {
+    await postDiscordRelease(webhookUrl, release);
+    await writeNotification(key, release);
+  } catch {
+    // Release metadata should stay available even when Discord is unavailable.
+  }
+}
+
+async function postDiscordRelease(webhookUrl: string, release: LatestReleaseResponse): Promise<void> {
+  const response = await fetch(webhookUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(discordReleasePayload(release)),
+    signal: AbortSignal.timeout(discordRequestTimeoutMs),
+  });
+  if (!response.ok) throw new Error(`Discord webhook request failed with HTTP ${response.status}.`);
+}
+
+function discordReleasePayload(release: LatestReleaseResponse): Record<string, unknown> {
+  const latestChange = release.changelog[0];
+  const description = release.changelog.slice(0, 5)
+    .map((change) => discordChangeLine(change))
+    .join("\n");
+  return {
+    username: "nstack releases",
+    content: `nstack ${release.version} is available`,
+    embeds: [
+      {
+        title: `nstack ${release.version}`,
+        url: latestChange?.url || release.url,
+        description: description || release.repository,
+        fields: [
+          { name: "Branch", value: release.branch || "main", inline: true },
+          { name: "Commit", value: release.commit || "unknown", inline: true },
+        ],
+        timestamp: release.fetchedAt,
+      },
+    ],
+  };
+}
+
+function discordChangeLine(change: ReleaseChange): string {
+  const link = change.url ? `[${change.commit}](${change.url})` : change.commit;
+  return `${link} ${change.message}`.slice(0, 240);
+}
+
+function releaseDiscordWebhookUrl(): string {
+  return process.env.NSTACK_RELEASE_DISCORD_WEBHOOK_URL || discordWebhookUrl();
 }
 
 async function readPackageManifest(): Promise<PackageManifest> {

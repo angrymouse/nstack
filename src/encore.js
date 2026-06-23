@@ -7,10 +7,11 @@ const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".js", ".mjs"]);
 export async function discoverEncoreResources(backendDir) {
   const root = path.resolve(backendDir);
   try {
-    return resourcesFromMetadata(parseEncoreMetadata(commandOutput("encore", ["debug", "meta", "-f", "json"], {
+    const resources = resourcesFromMetadata(parseEncoreMetadata(commandOutput("encore", ["debug", "meta", "-f", "json"], {
       cwd: root,
       maxBuffer: 32 * 1024 * 1024,
     })), root);
+    return withSourceSecrets(resources, root);
   } catch (error) {
     const fallback = resourcesFromSource(root);
     fallback.metadataError = error instanceof Error ? error.message : String(error);
@@ -156,6 +157,24 @@ function resourcesFromSource(backendDir) {
     secrets: [...new Set(matches(content, /(?:secret|Secret)\s*(?:<[^>]+>)?\s*\(\s*["'`]([^"'`]+)["'`]/g))].sort(),
     crons: sourceCrons(content),
   };
+}
+
+function withSourceSecrets(resources, backendDir) {
+  const sourceSecrets = sourceSecretsFromFiles(backendDir);
+  if (sourceSecrets.length === 0) return resources;
+  return {
+    ...resources,
+    secrets: [...new Set([...(resources.secrets || []), ...sourceSecrets])].sort(),
+  };
+}
+
+function sourceSecretsFromFiles(backendDir) {
+  try {
+    const content = walk(backendDir).map((file) => readFileSync(file, "utf8")).join("\n");
+    return [...new Set(matches(content, /(?:secret|Secret)\s*(?:<[^>]+>)?\s*\(\s*["'`]([^"'`]+)["'`]/g))].sort();
+  } catch {
+    return [];
+  }
 }
 
 function sourceDatabases(content) {

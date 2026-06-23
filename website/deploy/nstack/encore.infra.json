@@ -30,7 +30,11 @@
       "X-Request-Id"
     ]
   },
-  "secrets": {},
+  "secrets": {
+    "NSTACK_RELEASE_DISCORD_WEBHOOK_URL": {
+      "$env": "NSTACK_RELEASE_DISCORD_WEBHOOK_URL"
+    }
+  },
   "redis": {
     "release-metadata": {
       "host": "nstack-redis-ryoug1:6379",
