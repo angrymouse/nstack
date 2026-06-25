@@ -40,7 +40,7 @@ export async function runDev(cwd, args = [], options = {}) {
     stack.spawn("backend", "pnpm", ["--dir", "backend", "dev"]);
     runClientGenerator(cwd, "gen");
     stack.watchClient();
-    stack.spawn("frontend", "pnpm", ["--dir", "frontend", "dev"]);
+    stack.spawn("frontend", "pnpm", ["--dir", "frontend", "dev"], frontendDevEnv("http://localhost:4000"));
     const exit = await stack.waitForFirstExit();
     if (exit.signal) process.kill(process.pid, exit.signal);
     if (exit.code) throw new Error(`${exit.name} exited with code ${exit.code}.`);
@@ -156,14 +156,23 @@ function startDevExecStack(stack, options) {
 
   runClientGenerator(options.cwd, "gen");
   stack.watchClient();
-  stack.spawn("frontend", "pnpm", ["--dir", "frontend", "exec", "nuxt", "dev", "--host", "0.0.0.0", "--port", String(frontendPort)], {
-    NUXT_PUBLIC_API_BASE_URL: options.apiURL,
-    NUXT_PUBLIC_NSTACK_API_BASE_URL: options.apiURL,
-    NSTACK_PUBLIC_API_BASE_URL: options.apiURL,
-    NUXT_API_SERVER_BASE_URL: options.apiURL,
-    NUXT_API_INTERNAL_BASE_URL: options.apiURL,
-    NSTACK_API_BASE_URL: options.apiURL,
-  });
+  stack.spawn(
+    "frontend",
+    "pnpm",
+    ["--dir", "frontend", "exec", "nuxt", "dev", "--host", "0.0.0.0", "--port", String(frontendPort)],
+    frontendDevEnv(options.apiURL),
+  );
+}
+
+function frontendDevEnv(backendURL) {
+  return {
+    NUXT_PUBLIC_API_BASE_URL: "/api",
+    NUXT_PUBLIC_NSTACK_API_BASE_URL: "/api",
+    NSTACK_PUBLIC_API_BASE_URL: "/api",
+    NUXT_API_SERVER_BASE_URL: backendURL,
+    NUXT_API_INTERNAL_BASE_URL: backendURL,
+    NSTACK_API_BASE_URL: backendURL,
+  };
 }
 
 function createDevExec(cwd, args, cliOptions) {

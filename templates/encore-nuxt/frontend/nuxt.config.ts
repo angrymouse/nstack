@@ -4,7 +4,7 @@ const publicApiBaseUrl =
   process.env.NUXT_PUBLIC_API_BASE_URL ||
   process.env.NUXT_PUBLIC_NSTACK_API_BASE_URL ||
   process.env.NSTACK_PUBLIC_API_BASE_URL ||
-  (isProduction ? "/api" : "http://localhost:4000");
+  "/api";
 const serverApiBaseUrl =
   process.env.NUXT_API_SERVER_BASE_URL ||
   process.env.NUXT_API_INTERNAL_BASE_URL ||
@@ -28,6 +28,12 @@ export default defineNuxtConfig({
   nitro: {
     preset: "node-server",
     sourceMap: false,
+    devProxy: {
+      "/api": {
+        target: serverApiBaseUrl,
+        changeOrigin: true,
+      },
+    },
   },
   runtimeConfig: {
     apiServerBaseUrl: serverApiBaseUrl,
